@@ -1,3 +1,4 @@
+
 __pycache__/
 .idea
 .venv
@@ -52,7 +53,6 @@ fabric.properties
 *.exe
 *.out
 *.app
-.idea
 *.iml
 out
 gen

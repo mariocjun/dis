@@ -35,4 +35,4 @@ def debug_files(which='module'):
 
 
 if __name__ == "__main__":
-    debug_files('module')
+    debug_files()

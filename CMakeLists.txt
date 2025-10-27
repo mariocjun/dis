@@ -31,17 +31,68 @@ CPMAddPackage(
         GIT_TAG "5.0.0"
 )
 
+# yaml-cpp
+CPMAddPackage(
+        NAME yaml-cpp
+        GIT_REPOSITORY "https://github.com/jbeder/yaml-cpp.git"
+        GIT_TAG "0.8.0"
+        OPTIONS
+        "YAML_CPP_BUILD_TESTS OFF"
+        "YAML_CPP_BUILD_TOOLS OFF"
+)
+
 # OpenMP
 find_package(OpenMP REQUIRED)
 
+# --- NOVO BLOCO 1: Encontrar o Python ---
+# Adicionado para podermos chamar o script de documentação
+find_package(Python3 REQUIRED)
+
 # ---- Create executable ----
+add_executable(UltrasoundBenchmark
+        main.cpp
+        src/config.cpp
+        src/io_utils.cpp
+        src/solvers.cpp
+        src/utils.cpp
+        src/benchmark_runner.cpp
+        src/reporting.cpp
+)
 
-# O nome do executável agora é mais descritivo
-add_executable(UltrasoundServer main.cpp)
+# ---- Link Libraries ----
+target_link_libraries(UltrasoundBenchmark PRIVATE
+        Eigen3::Eigen       # Eigen
+        yaml-cpp::yaml-cpp  # yaml-cpp
+        OpenMP::OpenMP_CXX  # OpenMP
+)
 
-# Linkamos com a biblioteca Eigen.
-# O alvo 'Eigen3::Eigen' é criado pelo CMake do Eigen e inclui os diretórios de header.
-target_link_libraries(UltrasoundServer PRIVATE Eigen3::Eigen OpenMP::OpenMP_CXX)
+# Necessário para std::filesystem no GCC < 9
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+    target_link_libraries(UltrasoundBenchmark PRIVATE -lstdc++fs)
+endif ()
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0)
+    target_link_libraries(UltrasoundBenchmark PRIVATE -lc++fs)
+endif ()
 
-# Configuramos para usar o padrão C++26, como desejado.
-set_target_properties(UltrasoundServer PROPERTIES CXX_STANDARD 26)
+
+# --- NOVO BLOCO 2: Comando Pós-Compilação ---
+# Executa o script documentar.py toda vez que o 'UltrasoundBenchmark'
+# for compilado com sucesso.
+add_custom_command(
+        TARGET UltrasoundBenchmark
+        POST_BUILD  # Executa APÓS a compilação
+        COMMAND
+        # O comando que será executado no terminal
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/documentar.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Gerando documentação do projeto via documentar.py..."
+)
+
+
+# ---- Target Properties ----
+set_target_properties(UltrasoundBenchmark PROPERTIES CXX_STANDARD 23) # Já definido globalmente
+
+# Opcional: Otimizações de compilação para Release
+target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Release>:-O3 -DNDEBUG>)
+# Opcional: Flags de debug
+target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Debug>:-g>)
