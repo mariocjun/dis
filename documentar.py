@@ -4,7 +4,7 @@ from pathlib import Path
 
 DOC_DIR = "doc"
 BASE_OUTPUT = "DOC"
-EXT_ORDER = ["txt", "cpp", "hpp", "py", "yaml", "csv"]
+EXT_ORDER = ["txt", "cpp", "hpp", "py", "yaml", "csv", "sh"]
 MAX_CSV_SIZE = 10 * 1024
 
 IGNORE_DIRS = ["cmake", ".venv", "__pycache__", "README", "doc"]
@@ -141,7 +141,7 @@ def generate_tree(files):
 
 
 def get_language(ext):
-    lang_map = {"txt": "text", "cpp": "cpp", "hpp": "cpp", "py": "python", "yaml": "yaml", "csv": "csv"}
+    lang_map = {"txt": "text", "cpp": "cpp", "hpp": "cpp", "py": "python", "yaml": "yaml", "csv": "csv", "sh": "bash"}
     return lang_map.get(ext, "")
 
 
