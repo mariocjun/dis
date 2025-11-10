@@ -5,6 +5,9 @@
 
 cmake_minimum_required(VERSION 3.16)
 
+# Ativar log de comandos de compilação cmake
+set(CMAKE_VERBOSE_MAKEFILE OFF)
+
 # ---- Project ----
 
 project(UltrasoundServer LANGUAGES CXX)
