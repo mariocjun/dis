@@ -303,6 +303,34 @@ void saveHistoryToCSV(const std::vector<double>& history, const std::string &fil
     file.close();
 }
 
+// Função auxiliar para manter compatibilidade com ReconstructionResult
+void saveHistoryToCSV(const ReconstructionResult &result, const std::string &filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "[AVISO] Nao foi possivel criar o arquivo de historico: " << filename << std::endl;
+        return;
+    }
+
+    // Cabeçalho com mais métricas
+    file << "Iteration,ResidualNorm,SolutionNorm,ExecutionTime_ms\n";
+
+    for (size_t i = 0; i < result.residual_history.size(); ++i) {
+        file << i + 1 << ", "
+                << std::scientific << std::setprecision(8) << result.residual_history[i] << ", "
+                << std::scientific << std::setprecision(8) << (i < result.solution_history.size()
+                                                                   ? result.solution_history[i]
+                                                                   : 0.0) << ", "
+                << std::fixed << std::setprecision(2) << result.execution_time_ms << "\n";
+    }
+
+    if (!file) {
+        std::cerr << "[AVISO] Erro ao escrever no arquivo de historico: " << filename << std::endl;
+    } else {
+        std::cout << "[INFO] Historico de convergencia salvo em: " << filename << std::endl;
+    }
+    file.close();
+}
+
 void saveLcurveToCSV(const ReconstructionResult &result, const std::string &filename) {
     if (result.residual_history.size() != result.solution_history.size()) {
          std::cerr << "[AVISO] Tamanhos incompativeis (" << result.residual_history.size() << " vs "

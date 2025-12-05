@@ -121,11 +121,11 @@ def generate_tree(files):
 
         # --- INÍCIO DA MUDANÇA (CARACTERES 'PESADOS') ---
         if is_last:
-            connector = "┗━━ "  # Símbolo 'pesado'
+            connector = "+-- "
             child_prefix = parent_prefix + "    "
         else:
-            connector = "┣━━ "  # Símbolo 'pesado'
-            child_prefix = parent_prefix + "┃   "  # Símbolo 'pesado'
+            connector = "|-- "
+            child_prefix = parent_prefix + "|   "
         # --- FIM DA MUDANÇA ---
 
         if is_dir:
@@ -172,13 +172,13 @@ def main():
     now = datetime.now()
     filename = f"{BASE_OUTPUT}-{now.strftime('%d-%m-%Y--%H-%M')}.md"
     OUTPUT = doc_path / filename
-    print(f"Arquivo de saída: {OUTPUT}")
-    print("Coletando arquivos válidos...")
+    print(f"Arquivo de saida: {OUTPUT}")
+    print("Coletando arquivos validos...")
     files = get_valid_files()
     if not files:
-        print("Nenhum arquivo válido encontrado!")
+        print("Nenhum arquivo valido encontrado!")
         return
-    print(f"Encontrados {len(files)} arquivos válidos")
+    print(f"Encontrados {len(files)} arquivos validos")
     files_by_ext = {}
     for ext in EXT_ORDER:
         files_by_ext[ext] = []
@@ -189,7 +189,7 @@ def main():
     with open(OUTPUT, "w", encoding="utf-8") as f:
         print("Gerando metadados...")
         f.write(generate_metadata(files, files_by_ext))
-        print("Gerando estrutura de árvore...")
+        print("Gerando estrutura de arvore...")
         f.write("# Estrutura do projeto:\n")
         f.write(FENCE + "text\n")
         f.write(generate_tree(files))
@@ -210,10 +210,10 @@ def main():
                 except Exception as e:
                     f.write(f"# Erro ao ler arquivo: {e}\n")
                 f.write(FENCE + "\n\n")
-    print(f"\n✓ {filename} gerado com sucesso em {DOC_DIR}/")
+    print(f"\n[OK] {filename} gerado com sucesso em {DOC_DIR}/")
     doc_files = sorted(doc_path.glob(f"{BASE_OUTPUT}-*.md"))
     if len(doc_files) > 1:
-        print(f"\nVersões anteriores encontradas ({len(doc_files) - 1}):")
+        print(f"\nVersoes anteriores encontradas ({len(doc_files) - 1}):")
         for doc in doc_files[:-1]:
             size = format_size(doc.stat().st_size)
             mtime = datetime.fromtimestamp(doc.stat().st_mtime)

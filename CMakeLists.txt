@@ -3,10 +3,16 @@
 # Build and run by calling:
 # cmake -S. -B build && cmake --build build && ./build/Playground
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.23)
+cmake_policy(VERSION 3.23)
+
+# Garante compatibilidade com pacotes antigos que pedem < 3.5
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # Ativar log de comandos de compilação cmake
 set(CMAKE_VERBOSE_MAKEFILE OFF)
+
+set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS TRUE CACHE BOOL "Suprimir avisos de desenvolvedor")
 
 # ---- Project ----
 

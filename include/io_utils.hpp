@@ -35,6 +35,9 @@ void saveSparseMatrix(const Eigen::SparseMatrix<double>& mat, const std::string&
 // Salva o histórico de normas de resíduo em CSV
 void saveHistoryToCSV(const std::vector<double>& history, const std::string& filename);
 
+// Salva o histórico de convergência a partir de um ReconstructionResult
+void saveHistoryToCSV(const ReconstructionResult& result, const std::string& filename);
+
 // Salva os dados para a L-curve (norma da solução vs norma do resíduo) em CSV
 void saveLcurveToCSV(const ReconstructionResult& result, const std::string& filename);
 
