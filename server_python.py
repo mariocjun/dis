@@ -72,7 +72,7 @@ def cgnr_solver(g, H, iterations=10):
     z = H.T @ r
     p = z.copy()
     
-    lambda_reg = np.max(np.abs(z)) * 0.10
+    lambda_reg = np.max(np.abs(z)) * 0.0001
     if lambda_reg < 1e-9: lambda_reg = 1e-9
         
     previous_residual_norm = np.linalg.norm(r)
