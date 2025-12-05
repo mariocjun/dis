@@ -210,10 +210,23 @@ def run_benchmark_task():
             log("Erro na compilação.")
             return
         
-        exe_path = os.path.join(build_dir, "Release", "UltrasoundBenchmark.exe") if platform.system() == "Windows" else os.path.join(build_dir, "UltrasoundBenchmark")
+        # Tenta localizar o executável em locais padrões (Ninja vs MSVC)
+        possible_paths = []
+        if platform.system() == "Windows":
+            possible_paths.append(os.path.join(build_dir, "UltrasoundBenchmark.exe"))            # Ninja / Single Config
+            possible_paths.append(os.path.join(build_dir, "Release", "UltrasoundBenchmark.exe")) # MSVC / Multi Config
+            possible_paths.append(os.path.join(build_dir, "Debug", "UltrasoundBenchmark.exe"))   # Debug fallback
+        else:
+            possible_paths.append(os.path.join(build_dir, "UltrasoundBenchmark"))
+
+        exe_path = None
+        for p in possible_paths:
+            if os.path.exists(p):
+                exe_path = p
+                break
         
-        if not os.path.exists(exe_path):
-            log("Erro: Executável C++ não encontrado.")
+        if not exe_path:
+            log(f"Erro: Executável C++ não encontrado. Tentados: {possible_paths}")
             return
 
         # 2. Iniciar Servidores
