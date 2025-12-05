@@ -90,65 +90,7 @@
             color: var(--accent-success);
         }
 
-        /* Image Comparison Slider */
-        .comparison-container {
-            position: relative;
-            width: 100%;
-            /* Adjust as needed */
-            max-width: 400px;
-            margin: 0 auto;
-            aspect-ratio: 1 / 1;
-            background-color: #000;
-            border: 1px solid #333;
-            border-radius: 8px;
-            overflow: hidden;
-        }
 
-        .img-comp-img {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-        }
-
-        .img-comp-img img {
-            display: block;
-            width: 100%;
-            /* Fit container */
-            height: 100%;
-            object-fit: contain;
-            /* Ensure aspect ratio */
-        }
-
-        .img-comp-slider {
-            position: absolute;
-            z-index: 9;
-            cursor: ew-resize;
-            width: 40px;
-            height: 40px;
-            background-color: rgba(255, 255, 255, 0.2);
-            backdrop-filter: blur(4px);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            border-radius: 50%;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background-color 0.2s;
-        }
-
-        .img-comp-slider:hover {
-            background-color: rgba(255, 255, 255, 0.4);
-        }
-
-        .img-comp-slider::after {
-            content: '\f337';
-            font-family: 'Font Awesome 6 Free';
-            font-weight: 900;
-            color: white;
-        }
 
         /* Result Cards */
         .result-card {
@@ -295,67 +237,69 @@
 
         <!-- Main Content Grid -->
         <div class="row g-4">
-            <!-- Left: Logs & Charts -->
-            <div class="col-lg-4">
-                <!-- Log Accordion -->
-                <h2 class="h5 text-secondary mb-3 text-uppercase fs-6 ls-1">
-                    <button class="btn btn-sm btn-outline-secondary w-100 text-start" type="button"
-                        data-bs-toggle="collapse" data-bs-target="#collapseLog">
-                        <i class="fa-solid fa-terminal me-2"></i> Mostrar Logs do Sistema
-                    </button>
-                </h2>
-                <div id="collapseLog" class="accordion-collapse collapse show" data-bs-parent="#accordionLog">
-                    <div class="accordion-body p-0 mt-2">
-                        <div class="terminal-window" id="logTerminal">
-                            <div class="terminal-line"><span class="log-info">System initialized. Waiting for
-                                    commands...</span></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Charts -->
-                <div class="mt-4">
-                    <h2 class="h5 text-secondary mb-3 text-uppercase fs-6 ls-1">Performance Analytics</h2>
-                    <div class="card bg-dark border-secondary mb-3">
-                        <div class="card-body">
-                            <canvas id="timeChart" height="200"></canvas>
-                        </div>
-                    </div>
-                    <div class="card bg-dark border-secondary">
-                        <div class="card-body">
-                            <canvas id="speedupChart" height="150"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Right: Results Feed -->
-            <div class="col-lg-8">
+            <!-- Top: Results Feed (Full Width) -->
+            <div class="col-12">
                 <h2 class="h5 text-secondary mb-3 text-uppercase fs-6 ls-1">Feed de Resultados</h2>
                 <div id="resultsContainer">
                     <!-- Results will be injected here -->
                 </div>
+            </div>
+        </div>
 
-                <!-- Ranking Table (Initially Hidden) -->
-                <div id="rankingSection" class="mt-5 d-none">
-                    <h2 class="h5 text-secondary mb-3 text-uppercase fs-6 ls-1">Resumo Final</h2>
-                    <div class="table-responsive">
-                        <table class="table table-dark-custom table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Cenário</th>
-                                    <th>Tempo C++ (s)</th>
-                                    <th>Tempo Py (s)</th>
-                                    <th>Speedup</th>
-                                    <th>Iters (C++/Py)</th>
-                                </tr>
-                            </thead>
-                            <tbody id="rankingTableBody"></tbody>
-                        </table>
+        <!-- Bottom: Charts & Logs -->
+        <div class="row g-4 mt-2">
+            <!-- Charts -->
+            <div class="col-lg-8">
+                <h2 class="h5 text-secondary mb-3 text-uppercase fs-6 ls-1">Performance Analytics</h2>
+                <div class="row g-4">
+                    <div class="col-md-6">
+                        <div class="card bg-dark border-secondary h-100">
+                            <div class="card-body">
+                                <canvas id="timeChart" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-dark border-secondary h-100">
+                            <div class="card-body">
+                                <canvas id="speedupChart" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs -->
+            <div class="col-lg-4">
+                <h2 class="h5 text-secondary mb-3 text-uppercase fs-6 ls-1">
+                    <i class="fa-solid fa-terminal me-2"></i>Logs do Sistema
+                </h2>
+                <div class="terminal-window" id="logTerminal" style="height: 250px;">
+                    <div class="terminal-line"><span class="log-info">System initialized. Waiting for commands...</span>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- Ranking Table (Bottom) -->
+        <div id="rankingSection" class="mt-5 d-none">
+            <h2 class="h5 text-secondary mb-3 text-uppercase fs-6 ls-1">Resumo Final</h2>
+            <div class="table-responsive">
+                <table class="table table-dark-custom table-hover">
+                    <thead>
+                        <tr>
+                            <th>Cenário</th>
+                            <th>Tempo C++ (s)</th>
+                            <th>Tempo Py (s)</th>
+                            <th>Speedup</th>
+                            <th>Iters (C++/Py)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rankingTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
     </div>
 
     <!-- Scripts -->
@@ -415,6 +359,7 @@
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     plugins: { legend: { labels: { color: '#aaa' } } },
                     scales: {
                         y: { grid: { color: '#333' }, ticks: { color: '#aaa' } },
@@ -439,6 +384,7 @@
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
                         y: { grid: { color: '#333' }, ticks: { color: '#aaa' } },
@@ -517,38 +463,40 @@
                         <span class="text-success fw-bold" style="font-family: 'Roboto Mono'">${data.speedup.toFixed(2)}x Speedup</span>
                     </div>
                 </div>
-                <div class="row g-0">
-                    <!-- Images with Comparison Slider -->
-                    <div class="col-md-5 p-3 d-flex align-items-center justify-content-center bg-black">
-                        <div class="comparison-container" id="comp-${cardId}">
-                            <div class="img-comp-img">
-                                <img src="${safeImgPy}" alt="Python">
+                <div class="p-4">
+                    <!-- Images Row (Large) -->
+                    <div class="row g-4 mb-4">
+                        <div class="col-6 text-center">
+                            <div class="text-uppercase small text-secondary mb-2" style="font-size: 0.85rem; letter-spacing: 2px;">Python (Numpy)</div>
+                            <div class="bg-black p-2 rounded border border-dark">
+                                <img src="${safeImgPy}" class="img-fluid" style="width: 100%; object-fit: contain;" alt="Python">
                             </div>
-                            <div class="img-comp-img img-comp-overlay">
-                                <img src="${safeImgCpp}" alt="C++">
+                        </div>
+                        <div class="col-6 text-center">
+                            <div class="text-uppercase small text-secondary mb-2" style="font-size: 0.85rem; letter-spacing: 2px;">C++ (CGNR)</div>
+                            <div class="bg-black p-2 rounded border border-dark">
+                                <img src="${safeImgCpp}" class="img-fluid" style="width: 100%; object-fit: contain;" alt="C++">
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Metrics -->
-                    <div class="col-md-7">
-                        <div class="metrics-grid">
-                            <div class="metric-item">
-                                <span class="text-secondary">Tempo C++</span>
-                                <span style="color: var(--accent-cpp)">${data.time_cpp.toFixed(4)}s</span>
-                            </div>
-                            <div class="metric-item">
-                                <span class="text-secondary">Tempo Python</span>
-                                <span style="color: var(--accent-py)">${data.time_py.toFixed(4)}s</span>
-                            </div>
-                            <div class="metric-item">
-                                <span class="text-secondary">Iters C++</span>
-                                <span>${data.iters_cpp}</span>
-                            </div>
-                            <div class="metric-item">
-                                <span class="text-secondary">Iters Python</span>
-                                <span>${data.iters_py}</span>
-                            </div>
+                    <!-- Metrics Row (Minimalist) -->
+                    <div class="d-flex justify-content-center flex-wrap gap-5 text-center mt-3 pt-3 border-top border-dark">
+                        <div>
+                            <div class="text-secondary small text-uppercase" style="font-size: 0.7rem;">Tempo C++</div>
+                            <div class="fs-5 fw-bold" style="color: var(--accent-cpp)">${data.time_cpp.toFixed(4)}s</div>
+                        </div>
+                        <div>
+                            <div class="text-secondary small text-uppercase" style="font-size: 0.7rem;">Tempo Python</div>
+                            <div class="fs-5 fw-bold" style="color: var(--accent-py)">${data.time_py.toFixed(4)}s</div>
+                        </div>
+                        <div>
+                            <div class="text-secondary small text-uppercase" style="font-size: 0.7rem;">Iters C++</div>
+                            <div class="fs-5 fw-bold text-white">${data.iters_cpp}</div>
+                        </div>
+                        <div>
+                            <div class="text-secondary small text-uppercase" style="font-size: 0.7rem;">Iters Python</div>
+                            <div class="fs-5 fw-bold text-white">${data.iters_py}</div>
                         </div>
                     </div>
                 </div>
@@ -557,9 +505,6 @@
             const div = document.createElement('div');
             div.innerHTML = html;
             document.getElementById('resultsContainer').prepend(div); // Newest first
-
-            // Init Slider for this card
-            initComparison(document.getElementById(`comp-${cardId}`));
 
             // Update Table
             const row = `<tr>
@@ -572,61 +517,6 @@
             document.getElementById('rankingTableBody').innerHTML += row;
         }
 
-        function initComparison(elmnt) {
-            let x, i;
-            x = elmnt.getElementsByClassName("img-comp-overlay");
-            for (i = 0; i < x.length; i++) {
-                compareImages(x[i]);
-            }
-            function compareImages(img) {
-                let slider, clicked = 0, w, h;
-                w = img.offsetWidth;
-                h = img.offsetHeight;
-                img.style.width = (w / 2) + "px";
-
-                slider = document.createElement("DIV");
-                slider.setAttribute("class", "img-comp-slider");
-                img.parentElement.insertBefore(slider, img);
-                slider.style.top = (h / 2) - (slider.offsetHeight / 2) + "px";
-                slider.style.left = (w / 2) - (slider.offsetWidth / 2) + "px";
-
-                slider.addEventListener("mousedown", slideReady);
-                window.addEventListener("mouseup", slideFinish);
-                slider.addEventListener("touchstart", slideReady);
-                window.addEventListener("touchend", slideFinish);
-
-                function slideReady(e) {
-                    e.preventDefault();
-                    clicked = 1;
-                    window.addEventListener("mousemove", slideMove);
-                    window.addEventListener("touchmove", slideMove);
-                }
-                function slideFinish() {
-                    clicked = 0;
-                }
-                function slideMove(e) {
-                    let pos;
-                    if (clicked == 0) return false;
-                    pos = getCursorPos(e);
-                    if (pos < 0) pos = 0;
-                    if (pos > w) pos = w;
-                    slide(pos);
-                }
-                function getCursorPos(e) {
-                    let a, x = 0;
-                    e = (e.changedTouches) ? e.changedTouches[0] : e;
-                    a = img.getBoundingClientRect();
-                    x = e.pageX - a.left;
-                    x = x - window.pageXOffset;
-                    return x;
-                }
-                function slide(x) {
-                    img.style.width = x + "px";
-                    slider.style.left = img.offsetWidth - (slider.offsetWidth / 2) + "px";
-                }
-            }
-        }
-
         // --- Socket Events ---
 
         // Disable start initially
@@ -634,13 +524,13 @@
         setStatus('Desconectado', 'var(--accent-danger)');
 
         socket.on('connect', () => {
-            addLog(`Conectado ao servidor! ID: ${socket.id}`, 'success');
+            addLog(`Conectado ao servidor! ID: ${socket.id} `, 'success');
             document.getElementById('btnStart').disabled = false;
             setStatus('Pronto', 'var(--accent-success)');
         });
 
         socket.on('connect_error', (error) => {
-            addLog(`Erro de conexão: ${error}`, 'error');
+            addLog(`Erro de conexão: ${error} `, 'error');
             setStatus('Erro Conexão', 'var(--accent-danger)');
             document.getElementById('btnStart').disabled = true;
         });
