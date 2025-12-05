@@ -19,11 +19,13 @@
 // --- Função Principal (SIMPLIFICADA) ---
 int main(int argc, char *argv[]) {
     std::cout << "======================================================" << std::endl;
-    std::cout << " Comparativo: CGNR Standard vs Pre-condicionado vs FISTA" << std::endl;
+    std::cout << " Comparativo: CGNR Standard vs Pre-condicionado" << std::endl;
     std::cout << "======================================================" << std::endl;
 
     // Carrega a configuração do YAML
-    Config config = load_config("config.yaml");
+    std::filesystem::path executable_path(argv[0]);
+    std::filesystem::path config_path = executable_path.parent_path().parent_path() / "config.yaml";
+    Config config = load_config(config_path.string());
     if (config.run_pipelines.empty()) {
         std::cerr << "[ERRO] Nenhum pipeline definido no arquivo de configuração." << std::endl;
         return 1;
@@ -45,7 +47,11 @@ int main(int argc, char *argv[]) {
         std::cout << "[INFO] Processando dataset: " << dataset_name << std::endl;
         auto it = config.dataset_map.find(dataset_name);
         if (it != config.dataset_map.end()) {
-            tests.push_back(*it->second);
+            DatasetConfig dataset_config = *it->second; // Make a copy to modify paths
+            std::filesystem::path config_dir = config_path.parent_path();
+            dataset_config.h_matrix_csv = (config_dir / dataset_config.h_matrix_csv).string();
+            dataset_config.g_signal_csv = (config_dir / dataset_config.g_signal_csv).string();
+            tests.push_back(dataset_config);
             std::cout << "[INFO] Dataset " << dataset_name << " adicionado para processamento" << std::endl;
         } else {
             std::cout << "[AVISO] Dataset " << dataset_name << " não encontrado no mapa de configurações" << std::endl;
@@ -96,30 +102,30 @@ int main(int argc, char *argv[]) {
     }
 
     // --- Loop Principal de Testes ---
-    std::vector<std::tuple<std::string, PerformanceMetrics, PerformanceMetrics, PerformanceMetrics> > all_results;
+    std::vector<std::tuple<std::string, PerformanceMetrics, PerformanceMetrics> > all_results;
 
     // Verificação adicional para garantir que estamos processando apenas os datasets selecionados
     std::cout << "\n[INFO] Verificando datasets a serem processados:" << std::endl;
-    for (const auto &config: tests) {
-        std::cout << "  - Dataset: " << config.name << " (" << config.description << ")" << std::endl;
+    for (const auto &test_config: tests) {
+        std::cout << "  - Dataset: " << test_config.name << " (" << test_config.description << ")" << std::endl;
         bool is_in_pipeline = std::find(pipeline.dataset_names.begin(),
                                         pipeline.dataset_names.end(),
-                                        config.name) != pipeline.dataset_names.end();
+                                        test_config.name) != pipeline.dataset_names.end();
         if (!is_in_pipeline) {
-            std::cout << "[AVISO] Dataset " << config.name << " não está no pipeline atual. Ignorando." << std::endl;
+            std::cout << "[AVISO] Dataset " << test_config.name << " não está no pipeline atual. Ignorando." << std::endl;
             continue;
         }
 
-        std::cout << "\n========================================\nINICIANDO TESTE: " << config.description <<
+        std::cout << "\n========================================\nINICIANDO TESTE: " << test_config.description <<
                 // Usa .description
                 "\n========================================" << std::endl;
 
         try {
-            auto [fista_metrics, other_metrics] = run_sparse_comparison_with_fista(config);
-            all_results.push_back({config.description, other_metrics.first, other_metrics.second, fista_metrics});
-            std::cout << "Teste " << config.description << " concluido com sucesso." << std::endl;
+            auto [std_metrics, precond_metrics] = run_sparse_comparison(test_config, config.settings);
+            all_results.push_back(std::make_tuple(test_config.description, std_metrics, precond_metrics));
+            std::cout << "Teste " << test_config.description << " concluido com sucesso." << std::endl;
         } catch (const std::exception &e) {
-            std::cerr << "[ERRO FATAL] Falha ao executar comparacao para o teste " << config.description << ": " << e.
+            std::cerr << "[ERRO FATAL] Falha ao executar comparacao para o teste " << test_config.description << ": " << e.
                     what() << std::endl;
         }
     }
@@ -148,7 +154,7 @@ int main(int argc, char *argv[]) {
             "------------------------------------------------------------------------------------------------------------------------------------------------------"
             << std::endl;
 
-    for (const auto &[test_name, std_metrics, precond_metrics, fista_metrics]: all_results) {
+    for (const auto &[test_name, std_metrics, precond_metrics]: all_results) {
         auto print_metric = [&](const PerformanceMetrics &m, const std::string &method_name, bool is_baseline) {
             if (m.load_time_ms <= 0 && m.solve_time_ms <= 0) {
                 std::cout << std::left
@@ -186,7 +192,6 @@ int main(int argc, char *argv[]) {
 
         print_metric(std_metrics, "CGNR Standard", true);
         print_metric(precond_metrics, "CGNR Pre-condicionado", false);
-        print_metric(fista_metrics, "FISTA L1", false);
 
         std::cout <<
                 "------------------------------------------------------------------------------------------------------------------------------------------------------"
@@ -195,6 +200,8 @@ int main(int argc, char *argv[]) {
 
     std::cout << "\nBenchmark concluido." << std::endl;
     std::cout << "[INFO] Para visualizar os graficos de convergencia, execute:" << std::endl;
-    std::cout << "[INFO] python ../data/plot_convergence.py" << std::endl;
+    std::cout << "[INFO] python scripts/plot_convergence.py ../output_csv/metrics" << std::endl;
+    std::cout << "[INFO] Para gerar animacoes da reconstrucao das imagens, execute:" << std::endl;
+    std::cout << "[INFO] python scripts/visualize_iterations.py ../output_csv/images" << std::endl;
     return 0;
 }

@@ -86,8 +86,9 @@ inline ReconstructionResult run_cgnr_solver_epsilon_save_iters(
     const Eigen::VectorXd &g_signal, const MatrixType &H_model,
     const double tolerance, const int max_iterations,
     const std::string &base_filename_prefix,
-    const std::filesystem::path &output_dir,
-    int img_rows, int img_cols) {
+    const std::string &output_dir_str,
+    int img_rows, int img_cols,
+    bool save_intermediate_images) {
     if (H_model.rows() != g_signal.size()) throw std::runtime_error(
         "Dimensoes incompativeis: H.rows()!=" + std::to_string(H_model.rows()) + " vs g.size()=" + std::to_string(
             g_signal.size()));
@@ -96,6 +97,7 @@ inline ReconstructionResult run_cgnr_solver_epsilon_save_iters(
 
 
     const auto start_time = std::chrono::high_resolution_clock::now();
+    const std::filesystem::path output_dir(output_dir_str);
 
     Eigen::VectorXd f = Eigen::VectorXd::Zero(H_model.cols());
     Eigen::VectorXd r = g_signal;
@@ -128,10 +130,10 @@ inline ReconstructionResult run_cgnr_solver_epsilon_save_iters(
     double current_residual_norm = previous_residual_norm;
     double epsilon = std::numeric_limits<double>::max();
 
-    bool save_iters = !base_filename_prefix.empty() && img_rows > 0 && img_cols > 0;
+    bool save_iters = save_intermediate_images && !base_filename_prefix.empty() && img_rows > 0 && img_cols > 0;
     if (save_iters) {
         try {
-            std::filesystem::path iter_img_path = output_dir / (base_filename_prefix + "_iter_0.csv");
+            std::filesystem::path iter_img_path = output_dir / "images" / (base_filename_prefix + "_iter_0.csv");
             saveImageVectorToCsv(f, iter_img_path.string(), img_rows, img_cols);
         } catch (const std::exception &e) {
             std::cerr << "[AVISO] Falha ao salvar imagem iter 0: " << e.what() << std::endl;
@@ -158,7 +160,7 @@ inline ReconstructionResult run_cgnr_solver_epsilon_save_iters(
         if (save_iters) {
             try {
                 std::filesystem::path iter_img_path =
-                        output_dir / (base_filename_prefix + "_iter_" + std::to_string(i + 1) + ".csv");
+                        output_dir / "images" / (base_filename_prefix + "_iter_" + std::to_string(i + 1) + ".csv");
                 saveImageVectorToCsv(f, iter_img_path.string(), img_rows, img_cols);
             } catch (const std::exception &e) {
                 std::cerr << "[AVISO] Falha ao salvar imagem iter " << i + 1 << ": " << e.what() << std::endl;
@@ -217,13 +219,15 @@ inline ReconstructionResult run_cgnr_solver_preconditioned_save_iters(
     const Eigen::VectorXd &g_signal, const MatrixType &H_model,
     const double tolerance, const int max_iterations,
     const std::string &base_filename_prefix,
-    const std::filesystem::path &output_dir,
-    int img_rows, int img_cols) {
+    const std::string &output_dir_str,
+    int img_rows, int img_cols,
+    bool save_intermediate_images) {
     if (H_model.rows() != g_signal.size()) throw std::runtime_error("...");
     if (H_model.cols() <= 0) throw std::runtime_error("...");
     if (H_model.rows() == 0) return ReconstructionResult{};
 
     const auto start_time = std::chrono::high_resolution_clock::now();
+    const std::filesystem::path output_dir(output_dir_str);
 
     Eigen::VectorXd f = Eigen::VectorXd::Zero(H_model.cols());
     Eigen::VectorXd r = g_signal;
@@ -277,9 +281,10 @@ inline ReconstructionResult run_cgnr_solver_preconditioned_save_iters(
     double current_residual_norm = previous_residual_norm;
     double epsilon = std::numeric_limits<double>::max();
 
-    if (!base_filename_prefix.empty() && img_rows > 0 && img_cols > 0) {
+    bool save_iters = save_intermediate_images && !base_filename_prefix.empty() && img_rows > 0 && img_cols > 0;
+    if (save_iters) {
         try {
-            std::filesystem::path iter_img_path = output_dir / (base_filename_prefix + "_iter_0.csv");
+            std::filesystem::path iter_img_path = output_dir / "images" / (base_filename_prefix + "_iter_0.csv");
             saveImageVectorToCsv(f, iter_img_path.string(), img_rows, img_cols);
         } catch (const std::exception &e) {
             std::cerr << "[AVISO] Falha ao salvar imagem iter 0 (precond): " << e.what() << std::endl;
@@ -302,10 +307,10 @@ inline ReconstructionResult run_cgnr_solver_preconditioned_save_iters(
         f += alpha * p;
         r -= alpha * w;
 
-        if (!base_filename_prefix.empty() && img_rows > 0 && img_cols > 0) {
+        if (save_iters) {
             try {
                 std::filesystem::path iter_img_path =
-                        output_dir / (base_filename_prefix + "_iter_" + std::to_string(i + 1) + ".csv");
+                        output_dir / "images" / (base_filename_prefix + "_iter_" + std::to_string(i + 1) + ".csv");
                 saveImageVectorToCsv(f, iter_img_path.string(), img_rows, img_cols);
             } catch (const std::exception &e) {
                 std::cerr << "[AVISO] Falha ao salvar imagem iter " << i + 1 << " (precond): " << e.what() << std::endl;
@@ -416,207 +421,39 @@ inline ReconstructionResult run_cgnr_solver_fixed_iter(const Eigen::VectorXd &g_
     return result;
 }
 
-// --- Funções FISTA (Novas) ---
-
-template<typename MatrixType>
-inline double calculate_lipschitz_constant(const MatrixType &H, int max_power_iters = 20) {
-    if (H.cols() == 0) return 1.0;
-
-    Eigen::VectorXd v = Eigen::VectorXd::Random(H.cols());
-    v.normalize();
-
-    for (int i = 0; i < max_power_iters; ++i) {
-        Eigen::VectorXd H_v = H * v;
-        Eigen::VectorXd Ht_H_v = H.transpose() * H_v;
-        v = Ht_H_v;
-        v.normalize();
-    }
-
-    Eigen::VectorXd H_v = H * v;
-    double L = H_v.squaredNorm();
-
-    L = L * 1.05; // 5% de margem
-    if (L < 1e-6) L = 1.0; // Evita L zero
-
-    std::cout << "[INFO] Constante de Lipschitz (c) estimada: " << L << std::endl;
-    return L;
-}
-
-inline double soft_threshold(double x, double alpha) {
-    if (x > alpha) return x - alpha;
-    if (x < -alpha) return x + alpha;
-    return 0.0;
-}
-
-inline Eigen::VectorXd soft_threshold_vec(const Eigen::VectorXd &x, double alpha) {
-    return x.unaryExpr([alpha](double val) { return soft_threshold(val, alpha); });
-}
-
-template<typename MatrixType>
-inline ReconstructionResult run_fista_solver_save_iters(
-    const Eigen::VectorXd &g_signal, const MatrixType &H_model,
-    const double tolerance, const int max_iterations,
-    const std::string &base_filename_prefix,
-    const std::filesystem::path &output_dir,
-    int img_rows, int img_cols) {
-    if (H_model.rows() != g_signal.size()) throw std::runtime_error(
-        "Dimensoes incompativeis: H.rows()!=" + std::to_string(H_model.rows()) + " vs g.size()=" + std::to_string(
-            g_signal.size()));
-    if (H_model.cols() <= 0) throw std::runtime_error("Matriz H tem " + std::to_string(H_model.cols()) + " colunas.");
-    if (H_model.rows() == 0) return ReconstructionResult{};
-
-
-    const auto start_time = std::chrono::high_resolution_clock::now();
-
-    Eigen::VectorXd f_k = Eigen::VectorXd::Zero(H_model.cols());
-    Eigen::VectorXd y_k = f_k;
-    double t_k = 1.0;
-    Eigen::VectorXd f_k_next, y_k_next;
-    double t_k_next;
-
-    double c = calculate_lipschitz_constant(H_model);
-    double step_size = 1.0 / c;
-
-    Eigen::VectorXd Ht_g = H_model.transpose() * g_signal;
-    double lambda = 0.0;
-    if (Ht_g.size() > 0) {
-        lambda = Ht_g.cwiseAbs().maxCoeff() * 0.10;
-        constexpr double min_lambda = 1e-9;
-        if (lambda < min_lambda) {
-            lambda = min_lambda;
-            std::cout << "[INFO] Lambda (FISTA) calculado era quase zero, usando piso minimo: " << lambda << std::endl;
-        }
-    } else {
-        lambda = 1e-9;
-        std::cout << "[AVISO] Vetor H^T*g (FISTA) inicial vazio, usando lambda=" << lambda << " como fallback." <<
-                std::endl;
-    }
-    std::cout << "[INFO] Lambda (FISTA-L1): " << lambda << std::endl;
-    double threshold_param = lambda * step_size;
-
-    ReconstructionResult result;
-    result.iterations = 0;
-    result.converged = false;
-    result.residual_history.clear();
-    result.residual_history.reserve(max_iterations);
-    result.solution_history.clear();
-    result.solution_history.reserve(max_iterations);
-
-    double current_residual_norm = (g_signal - H_model * f_k).norm();
-    double previous_residual_norm = current_residual_norm;
-    double epsilon = std::numeric_limits<double>::max();
-
-    bool save_iters = !base_filename_prefix.empty() && img_rows > 0 && img_cols > 0;
-    if (save_iters) {
-        try {
-            std::filesystem::path iter_img_path = output_dir / (base_filename_prefix + "_iter_0.csv");
-            saveImageVectorToCsv(f_k, iter_img_path.string(), img_rows, img_cols);
-        } catch (const std::exception &e) {
-            std::cerr << "[AVISO] Falha ao salvar imagem iter 0 (FISTA): " << e.what() << std::endl;
-        }
-    }
-
-    for (int i = 0; i < max_iterations; ++i) {
-        result.iterations = i + 1;
-
-        Eigen::VectorXd grad_y = H_model.transpose() * (H_model * y_k - g_signal);
-        f_k_next = soft_threshold_vec(y_k - step_size * grad_y, threshold_param);
-
-        t_k_next = (1.0 + std::sqrt(1.0 + 4.0 * t_k * t_k)) / 2.0;
-        y_k_next = f_k_next + ((t_k - 1.0) / t_k_next) * (f_k_next - f_k);
-
-        f_k = f_k_next;
-        y_k = y_k_next;
-        t_k = t_k_next;
-
-        if (save_iters) {
-            try {
-                std::filesystem::path iter_img_path =
-                        output_dir / (base_filename_prefix + "_iter_" + std::to_string(i + 1) + ".csv");
-                saveImageVectorToCsv(f_k, iter_img_path.string(), img_rows, img_cols);
-            } catch (const std::exception &e) {
-                std::cerr << "[AVISO] Falha ao salvar imagem iter " << i + 1 << " (FISTA): " << e.what() << std::endl;
-            }
-        }
-
-        current_residual_norm = (g_signal - H_model * f_k).norm();
-        result.residual_history.push_back(current_residual_norm);
-        result.solution_history.push_back(f_k.norm());
-        epsilon = std::abs(current_residual_norm - previous_residual_norm);
-
-        if (epsilon < tolerance) {
-            result.converged = true;
-            std::cout << "[INFO] Convergencia por epsilon (FISTA) atingida na iteracao " << i + 1 << " (epsilon=" <<
-                    std::scientific << epsilon << " < " << tolerance << ")" << std::defaultfloat << std::endl;
-            break;
-        }
-        previous_residual_norm = current_residual_norm;
-
-        if (i == max_iterations - 1 && !result.converged) {
-            std::cout << "[INFO] Numero maximo de iteracoes (FISTA) (" << max_iterations <<
-                    ") atingido sem convergencia por epsilon (ultimo epsilon=" << std::scientific << epsilon <<
-                    std::defaultfloat << ")." << std::endl;
-        }
-    } // Fim do loop
-
-    const auto end_time = std::chrono::high_resolution_clock::now();
-    result.image = f_k;
-    result.final_error = current_residual_norm;
-    result.final_epsilon = epsilon;
-    result.execution_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-    return result;
-}
-
-// **** FIM DO FISTA ****
-
-
 // --- Instanciações explícitas para os tipos de matrizes ---
 template ReconstructionResult run_cgnr_solver_epsilon_save_iters<Eigen::SparseMatrix<double> >(
     const Eigen::VectorXd &g_signal, const Eigen::SparseMatrix<double> &H_model,
     double tolerance, int max_iterations,
-    const std::string &base_filename_prefix, const std::filesystem::path &output_dir,
-    int img_rows, int img_cols);
+    const std::string &base_filename_prefix, const std::string &output_dir,
+    int img_rows, int img_cols, bool save_intermediate_images);
 
 template ReconstructionResult run_cgnr_solver_preconditioned_save_iters<Eigen::SparseMatrix<double> >(
     const Eigen::VectorXd &g_signal, const Eigen::SparseMatrix<double> &H_model,
     double tolerance, int max_iterations,
-    const std::string &base_filename_prefix, const std::filesystem::path &output_dir,
-    int img_rows, int img_cols);
+    const std::string &base_filename_prefix, const std::string &output_dir,
+    int img_rows, int img_cols, bool save_intermediate_images);
 
 template ReconstructionResult run_cgnr_solver_fixed_iter<Eigen::SparseMatrix<double> >(
     const Eigen::VectorXd &g_signal, const Eigen::SparseMatrix<double> &H_model,
     int num_iterations);
 
-// Instanciação do FISTA
-template ReconstructionResult run_fista_solver_save_iters<Eigen::SparseMatrix<double> >(
-    const Eigen::VectorXd &g_signal, const Eigen::SparseMatrix<double> &H_model,
-    double tolerance, int max_iterations,
-    const std::string &base_filename_prefix, const std::filesystem::path &output_dir,
-    int img_rows, int img_cols);
-
-
 // Instanciações para Matriz Densa (para reativar testes densos se necessário)
 template ReconstructionResult run_cgnr_solver_epsilon_save_iters<Eigen::MatrixXd>(
     const Eigen::VectorXd &g_signal, const Eigen::MatrixXd &H_model,
     double tolerance, int max_iterations,
-    const std::string &base_filename_prefix, const std::filesystem::path &output_dir,
-    int img_rows, int img_cols);
+    const std::string &base_filename_prefix, const std::string &output_dir,
+    int img_rows, int img_cols, bool save_intermediate_images);
 
 template ReconstructionResult run_cgnr_solver_preconditioned_save_iters<Eigen::MatrixXd>(
     const Eigen::VectorXd &g_signal, const Eigen::MatrixXd &H_model,
     double tolerance, int max_iterations,
-    const std::string &base_filename_prefix, const std::filesystem::path &output_dir,
-    int img_rows, int img_cols);
+    const std::string &base_filename_prefix, const std::string &output_dir,
+    int img_rows, int img_cols, bool save_intermediate_images);
 
 template ReconstructionResult run_cgnr_solver_fixed_iter<Eigen::MatrixXd>(
     const Eigen::VectorXd &g_signal, const Eigen::MatrixXd &H_model,
     int num_iterations);
-
-template ReconstructionResult run_fista_solver_save_iters<Eigen::MatrixXd>(
-    const Eigen::VectorXd &g_signal, const Eigen::MatrixXd &H_model,
-    double tolerance, int max_iterations,
-    const std::string &base_filename_prefix, const std::filesystem::path &output_dir,
-    int img_rows, int img_cols);
 
 
 // --- Função Principal de Comparação Esparsa ---
@@ -630,10 +467,10 @@ inline int find_l_curve_corner(const std::vector<double> &residual_norms, const 
     std::vector<double> log_solution(solution_norms.size());
 
     // Calcula os logs e normaliza
-    double min_res = *std::min_element(residual_norms.begin(), residual_norms.end());
-    double max_res = *std::max_element(residual_norms.begin(), residual_norms.end());
-    double min_sol = *std::min_element(solution_norms.begin(), solution_norms.end());
-    double max_sol = *std::max_element(solution_norms.begin(), solution_norms.end());
+    const double min_res = *std::ranges::min_element(residual_norms);
+    const double max_res = *std::ranges::max_element(residual_norms);
+    const double min_sol = *std::ranges::min_element(solution_norms);
+    const double max_sol = *std::ranges::max_element(solution_norms);
 
     for (size_t i = 0; i < residual_norms.size(); ++i) {
         log_residual[i] = (std::log(residual_norms[i]) - std::log(min_res)) /
@@ -677,7 +514,8 @@ inline int find_l_curve_corner(const std::vector<double> &residual_norms, const 
     return corner_idx;
 }
 
-inline std::pair<PerformanceMetrics, PerformanceMetrics> run_sparse_comparison(const DatasetConfig &config) {
+inline std::pair<PerformanceMetrics, PerformanceMetrics> run_sparse_comparison(
+    const DatasetConfig &config, const GlobalSettings &settings) {
     PerformanceMetrics standard_metrics;
     PerformanceMetrics precond_metrics;
     standard_metrics.optimization_type = "standard";
@@ -685,8 +523,8 @@ inline std::pair<PerformanceMetrics, PerformanceMetrics> run_sparse_comparison(c
 
     // Primeiro roda com iterações suficientes para encontrar o ponto ótimo
     constexpr int initial_iterations = 50; // Número de iterações para construir a curva L
-    constexpr int max_iterations = 10;
-    constexpr double epsilon_tolerance = 1e-4;
+    const int max_iterations = settings.max_iterations;
+    const double epsilon_tolerance = settings.epsilon_tolerance;
 
     std::cout << "\n-----------------------------------------------------" << std::endl;
     // **** CORREÇÃO: test_name -> description ****
@@ -696,10 +534,10 @@ inline std::pair<PerformanceMetrics, PerformanceMetrics> run_sparse_comparison(c
     // **** CORREÇÃO: test_name -> name ****
     std::string base_filename = config.name; // Usa o nome curto para arquivos
     // C++17 compatível replace:
-    std::replace(base_filename.begin(), base_filename.end(), ' ', '_');
-    std::replace(base_filename.begin(), base_filename.end(), '(', '_');
-    std::replace(base_filename.begin(), base_filename.end(), ')', '_');
-    std::replace(base_filename.begin(), base_filename.end(), '-', '_');
+    std::ranges::replace(base_filename, ' ', '_');
+    std::ranges::replace(base_filename, '(', '_');
+    std::ranges::replace(base_filename, ')', '_');
+    std::ranges::replace(base_filename, '-', '_');
 
 
     std::filesystem::path output_dir = "../output_csv";
@@ -730,7 +568,7 @@ inline std::pair<PerformanceMetrics, PerformanceMetrics> run_sparse_comparison(c
         std::string filename_prefix_fista = "image_" + base_filename + "_sparse_fista";
         ReconstructionResult res_std = run_cgnr_solver_epsilon_save_iters(
             g_std, H_std, epsilon_tolerance, max_iterations,
-            filename_prefix_std, output_dir, config.image_rows, config.image_cols);
+            filename_prefix_std, output_dir.string(), config.image_rows, config.image_cols, settings.save_intermediate_images);
 
         standard_metrics.solve_time_ms = res_std.execution_time_ms;
         standard_metrics.iterations = res_std.iterations;
@@ -778,7 +616,7 @@ inline std::pair<PerformanceMetrics, PerformanceMetrics> run_sparse_comparison(c
         std::string filename_prefix_pre = "image_" + base_filename + "_sparse_precond";
         ReconstructionResult res_pre = run_cgnr_solver_preconditioned_save_iters(
             g_pre, H_pre, epsilon_tolerance, max_iterations,
-            filename_prefix_pre, output_dir, config.image_rows, config.image_cols);
+            filename_prefix_pre, output_dir.string(), config.image_rows, config.image_cols, settings.save_intermediate_images);
 
         precond_metrics.solve_time_ms = res_pre.execution_time_ms;
         precond_metrics.iterations = res_pre.iterations;
@@ -812,201 +650,6 @@ inline std::pair<PerformanceMetrics, PerformanceMetrics> run_sparse_comparison(c
     return {standard_metrics, precond_metrics};
 }
 
-// Função para executar o FISTA e coletar métricas
-inline std::pair<PerformanceMetrics, ReconstructionResult> run_sparse_fista(
-    const DatasetConfig &config,
-    const std::filesystem::path &output_dir,
-    const double tolerance = 1e-6,
-    const int max_iterations = 1000) {
-    PerformanceMetrics metrics;
-    metrics.optimization_type = "fista";
-
-    const auto load_start = std::chrono::high_resolution_clock::now();
-
-    // Carrega a matriz H do arquivo binário esparso
-    const std::filesystem::path h_path(config.h_matrix_csv);
-    const std::string sparse_bin_path = h_path.parent_path().string() + "/" + h_path.filename().string() +
-                                        ".sparse.bin";
-    Eigen::SparseMatrix<double> H = loadSparseMatrix(sparse_bin_path);
-
-    // Carrega o sinal g
-    Eigen::VectorXd g = loadVectorData(config.g_signal_csv);
-
-    // Normaliza o sistema
-    normalize_system_rows(H, g);
-
-    const auto load_end = std::chrono::high_resolution_clock::now();
-    metrics.load_time_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
-
-    // Estima uso de RAM (em MB) - apenas para matriz esparsa
-    metrics.estimated_ram_mb = (H.nonZeros() * (sizeof(double) + sizeof(int)) +
-                                H.outerSize() * sizeof(int)) / (1024.0 * 1024.0);
-
-    // Executa o solver FISTA
-    const auto solve_start = std::chrono::high_resolution_clock::now();
-
-    ReconstructionResult result = run_fista_solver_save_iters(
-        g, H, tolerance, max_iterations,
-        "fista_" + config.name, output_dir,
-        config.image_rows, config.image_cols
-    );
-
-    const auto solve_end = std::chrono::high_resolution_clock::now();
-    metrics.solve_time_ms = std::chrono::duration<double, std::milli>(solve_end - solve_start).count();
-
-    // Atualiza métricas finais
-    metrics.iterations = result.iterations;
-    metrics.final_error = result.final_error;
-    metrics.final_epsilon = result.final_epsilon;
-    metrics.converged = result.converged;
-
-    return {metrics, result};
-}
-
-// Função para comparar FISTA com os outros métodos
-inline std::pair<PerformanceMetrics, std::pair<PerformanceMetrics, PerformanceMetrics> >
-run_sparse_comparison_with_fista(const DatasetConfig &config) {
-    std::filesystem::path output_dir = "../output_csv";
-    constexpr double tolerance = 1e-6;
-    constexpr int max_iterations = 1000;
-    constexpr int initial_iterations = 50; // Número de iterações para construir a curva L
-
-    // Cria base_filename padronizado
-    std::string base_filename = config.name;
-    std::replace(base_filename.begin(), base_filename.end(), ' ', '_');
-    std::replace(base_filename.begin(), base_filename.end(), '(', '_');
-    std::replace(base_filename.begin(), base_filename.end(), ')', '_');
-    std::replace(base_filename.begin(), base_filename.end(), '-', '_');
-
-    // Define prefixos padronizados para todos os métodos
-    std::string filename_prefix_std = "image_" + base_filename + "_sparse_standard";
-    std::string filename_prefix_pre = "image_" + base_filename + "_sparse_precond";
-    std::string filename_prefix_fista = "image_" + base_filename + "_sparse_fista";
-
-    // Execute each solver
-    PerformanceMetrics standard_metrics;
-    standard_metrics.optimization_type = "standard";
-
-    PerformanceMetrics precond_metrics;
-    precond_metrics.optimization_type = "precond";
-
-    PerformanceMetrics fista_metrics;
-    fista_metrics.optimization_type = "fista";
-
-    try {
-        // Standard CGNR
-        const auto std_load_start = std::chrono::high_resolution_clock::now();
-        std::filesystem::path h_path(config.h_matrix_csv);
-        std::string sparse_bin_path = h_path.parent_path().string() + "/" + h_path.filename().string() + ".sparse.bin";
-        Eigen::SparseMatrix<double> H_std = loadSparseMatrix(sparse_bin_path);
-        Eigen::VectorXd g_std = loadVectorData(config.g_signal_csv);
-        const auto std_load_end = std::chrono::high_resolution_clock::now();
-        standard_metrics.load_time_ms = std::chrono::duration<double, std::milli>(std_load_end - std_load_start).
-                count();
-
-        normalize_system_rows(H_std, g_std);
-        auto std_result = run_cgnr_solver_epsilon_save_iters(
-            g_std, H_std, tolerance, max_iterations,
-            filename_prefix_std, output_dir,
-            config.image_rows, config.image_cols
-        );
-
-        standard_metrics.solve_time_ms = std_result.execution_time_ms;
-        standard_metrics.iterations = std_result.iterations;
-        standard_metrics.final_error = std_result.final_error;
-        standard_metrics.final_epsilon = std_result.final_epsilon;
-        standard_metrics.converged = std_result.converged;
-
-        // Save convergence history
-        std::filesystem::path hist_path_std =
-                output_dir / ("convergence_history_" + base_filename + "_sparse_standard.csv");
-        std::filesystem::path lcurve_path_std = output_dir / ("lcurve_" + base_filename + "_sparse_standard.csv");
-        saveHistoryToCSV(std_result.residual_history, hist_path_std.string());
-        saveLcurveToCSV(std_result, lcurve_path_std.string());
-    } catch (const std::exception &e) {
-        std::cerr << "[ERRO] Falha no CGNR padrao: " << e.what() << std::endl;
-    }
-
-    try {
-        // Preconditioned CGNR
-        const auto pre_load_start = std::chrono::high_resolution_clock::now();
-        std::filesystem::path h_path(config.h_matrix_csv);
-        std::string sparse_bin_path = h_path.parent_path().string() + "/" + h_path.filename().string() + ".sparse.bin";
-        Eigen::SparseMatrix<double> H_pre = loadSparseMatrix(sparse_bin_path);
-        Eigen::VectorXd g_pre = loadVectorData(config.g_signal_csv);
-        const auto pre_load_end = std::chrono::high_resolution_clock::now();
-        precond_metrics.load_time_ms = std::chrono::duration<double, std::milli>(pre_load_end - pre_load_start).count();
-
-        normalize_system_rows(H_pre, g_pre);
-        auto pre_result = run_cgnr_solver_preconditioned_save_iters(
-            g_pre, H_pre, tolerance, max_iterations,
-            filename_prefix_pre, output_dir,
-            config.image_rows, config.image_cols
-        );
-
-        precond_metrics.solve_time_ms = pre_result.execution_time_ms;
-        precond_metrics.iterations = pre_result.iterations;
-        precond_metrics.final_error = pre_result.final_error;
-        precond_metrics.final_epsilon = pre_result.final_epsilon;
-        precond_metrics.converged = pre_result.converged;
-
-        // Save convergence history
-        std::filesystem::path hist_path_pre =
-                output_dir / ("convergence_history_" + base_filename + "_sparse_precond.csv");
-        std::filesystem::path lcurve_path_pre = output_dir / ("lcurve_" + base_filename + "_sparse_precond.csv");
-        saveHistoryToCSV(pre_result.residual_history, hist_path_pre.string());
-        saveLcurveToCSV(pre_result, lcurve_path_pre.string());
-    } catch (const std::exception &e) {
-        std::cerr << "[ERRO] Falha no CGNR pre-condicionado: " << e.what() << std::endl;
-    }
-
-    try {
-        // FISTA
-        const auto fista_load_start = std::chrono::high_resolution_clock::now();
-        std::filesystem::path h_path(config.h_matrix_csv);
-        std::string sparse_bin_path = h_path.parent_path().string() + "/" + h_path.filename().string() + ".sparse.bin";
-        Eigen::SparseMatrix<double> H_fista = loadSparseMatrix(sparse_bin_path);
-        Eigen::VectorXd g_fista = loadVectorData(config.g_signal_csv);
-        const auto fista_load_end = std::chrono::high_resolution_clock::now();
-        fista_metrics.load_time_ms = std::chrono::duration<double, std::milli>(fista_load_end - fista_load_start).
-                count();
-
-        normalize_system_rows(H_fista, g_fista);
-        auto fista_result = run_fista_solver_save_iters(
-            g_fista, H_fista, tolerance, initial_iterations,
-            filename_prefix_fista, output_dir,
-            config.image_rows, config.image_cols
-        );
-
-        // Encontra o ponto ótimo na curva L
-        int optimal_iter_fista = find_l_curve_corner(fista_result.residual_history, fista_result.solution_history);
-        std::cout << "[INFO] Ponto otimo da curva L (FISTA) encontrado na iteracao " << optimal_iter_fista << std::endl;
-
-        // Executa novamente com o número ótimo de iterações
-        auto fista_result_optimal = run_fista_solver_save_iters(
-            g_fista, H_fista, tolerance, optimal_iter_fista,
-            filename_prefix_fista, output_dir,
-            config.image_rows, config.image_cols
-        );
-
-        fista_metrics.solve_time_ms = fista_result.execution_time_ms;
-        fista_metrics.iterations = fista_result.iterations;
-        fista_metrics.final_error = fista_result.final_error;
-        fista_metrics.final_epsilon = fista_result.final_epsilon;
-        fista_metrics.converged = fista_result.converged;
-
-        // Save convergence history
-        std::filesystem::path hist_path_fista =
-                output_dir / ("convergence_history_" + base_filename + "_sparse_fista.csv");
-        std::filesystem::path lcurve_path_fista = output_dir / ("lcurve_" + base_filename + "_sparse_fista.csv");
-        saveHistoryToCSV(fista_result, hist_path_fista.string());
-        saveLcurveToCSV(fista_result, lcurve_path_fista.string());
-    } catch (const std::exception &e) {
-        std::cerr << "[ERRO] Falha no FISTA: " << e.what() << std::endl;
-    }
-
-    return {fista_metrics, {standard_metrics, precond_metrics}};
-}
 
 // --- Criação de Diretórios de Saída ---
 inline void create_output_directories(const std::filesystem::path &output_dir) {

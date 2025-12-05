@@ -3,8 +3,8 @@
 # Configurações Globais do Benchmark
 settings:
   output_base_dir: "output"  # Diretório base relativo ao diretório de build
-  epsilon_tolerance: 1.0e-4
-  max_iterations: 10
+  epsilon_tolerance: 1.0e-6
+  max_iterations: 1000
   save_intermediate_images: true # true para salvar imagem a cada iteração, false para salvar só a final
   num_omp_threads: 0           # 0 para usar o máximo padrão do OpenMP, ou especifique um número
 
@@ -41,48 +41,23 @@ datasets:
 # Definição dos Métodos de Reconstrução a serem testados
 methods:
   - name: "sparse_standard"
-    description: "Esparso / Binario (Standard)"
-    solver: "cgnr_standard" # Identificador da função solver a ser chamada
+    description: "CGNR esparso padrao"
+    solver: "cgnr_standard"
     use_binary: true
-    is_baseline: true      # Marca este como referência para speedup
+    is_baseline: true
 
   - name: "sparse_jacobi"
-    description: "Esparso / Binario (Jacobi)"
-    solver: "cgnr_preconditioned" # Identificador da função solver
+    description: "CGNR esparso com pre-condicionador Jacobi"
+    solver: "cgnr_jacobi"
     use_binary: true
     is_baseline: false
-
-  - name: "sparse_fista"
-    description: "Esparso / Binario (FISTA)"
-    solver: "fista"
-    use_binary: true
-    is_baseline: false
-
-  # Adicione aqui se/quando implementar FISTA
-  # - name: "sparse_fista"
-  #   description: "Esparso / Binario (FISTA)"
-  #   solver: "fista"
-  #   use_binary: true
-  #   is_baseline: false
-
-  # Você pode reativar os testes densos/texto se quiser
-  # - name: "dense_text"
-  #   description: "Denso / Texto"
-  #   solver: "cgnr_standard" # Usaria o mesmo solver, mas com matriz densa
-  #   use_binary: false
-  #   is_baseline: false
-  # - name: "dense_binary"
-  # ...
 
 # Quais comparações/pipelines executar
 run_pipelines:
   - name: "Sparse_Comparison"
-    description: "Compara CGNR Standard, Jacobi e FISTA"
-    methods: [ "sparse_standard", "sparse_jacobi", "sparse_fista" ]
-    datasets: [ "30x30_g1" ] # Comece com um dataset pequeno para testar
-
-  # Exemplo: Rodar FISTA em um dataset específico
-  # - name: "FISTA_Test_Small"
-  #   description: "Testa FISTA no dataset 30x30 g1"
-  #   methods: ["sparse_fista"]
-  #   datasets: ["30x30_g1"]
+    description: "Compara os metodos esparsos CGNR e Jacobi"
+    methods:
+      - "sparse_standard"
+      - "sparse_jacobi"
+    datasets:
+      - "30x30_g1"
