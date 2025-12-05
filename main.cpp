@@ -22,10 +22,47 @@ int main(int argc, char *argv[]) {
     std::cout << " Comparativo: CGNR Standard vs Pre-condicionado" << std::endl;
     std::cout << "======================================================" << std::endl;
 
-    // Carrega a configuração do YAML
-    std::filesystem::path executable_path(argv[0]);
-    std::filesystem::path config_path = executable_path.parent_path().parent_path() / "config.yaml";
-    Config config = load_config(config_path.string());
+    // --- Config Loading Logic ---
+    std::string config_file_path = "config.yaml"; // Default
+
+    // 1. Check if user provided a path via command line
+    if (argc > 1) {
+        config_file_path = argv[1];
+    } else {
+        // 2. Try to find config.yaml relative to executable or current path
+        std::filesystem::path exe_path(argv[0]);
+        std::filesystem::path search_paths[] = {
+            std::filesystem::current_path() / "config.yaml",
+            exe_path.parent_path() / "config.yaml",
+            exe_path.parent_path().parent_path() / "config.yaml",
+            exe_path.parent_path().parent_path().parent_path() / "config.yaml"
+        };
+
+        bool found = false;
+        for (const auto& p : search_paths) {
+            if (std::filesystem::exists(p)) {
+                config_file_path = p.string();
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) {
+             std::cout << "[AVISO] config.yaml nao encontrado nos caminhos padrao. Tentando 'config.yaml' no diretorio atual." << std::endl;
+        }
+    }
+
+    std::cout << "[INFO] Tentando carregar configuracao de: " << config_file_path << std::endl;
+
+    std::filesystem::path config_path(config_file_path);
+    Config config;
+    try {
+        config = load_config(config_file_path);
+    } catch (const std::exception& e) {
+        std::cerr << "[ERRO FATAL] Erro ao carregar configuracao: " << e.what() << std::endl;
+        return 1;
+    }
+
     if (config.run_pipelines.empty()) {
         std::cerr << "[ERRO] Nenhum pipeline definido no arquivo de configuração." << std::endl;
         return 1;
