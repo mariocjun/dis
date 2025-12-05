@@ -19,7 +19,6 @@ set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS TRUE CACHE BOOL "Suprimir avisos de desenv
 project(UltrasoundServer LANGUAGES CXX)
 
 # ---- Fetch CPM ----
-# (Esta parte baixa o gerenciador de pacotes CPM, mantemos como está)
 file(
         DOWNLOAD
         https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.39.0/CPM.cmake
@@ -30,14 +29,15 @@ include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
 
 # ---- Add dependencies via CPM ----
 
-# MUDANÇA: Usando o repositório oficial do GitLab e a versão 5.0.0.
-# O CPM fará o download do código-fonte. Como Eigen é "header-only",
-# não há etapa de compilação para a própria biblioteca.
+# Eigen3
 CPMAddPackage(
         NAME Eigen3
-        VERSION 5.0.0
+        VERSION 3.4.0
         GIT_REPOSITORY "https://gitlab.com/libeigen/eigen.git"
-        GIT_TAG "5.0.0"
+        GIT_TAG "3.4.0"
+        OPTIONS
+        "BUILD_TESTING OFF"
+        "EIGEN_BUILD_DOC OFF"
 )
 
 # yaml-cpp
@@ -53,8 +53,14 @@ CPMAddPackage(
 # OpenMP
 find_package(OpenMP REQUIRED)
 
-# --- NOVO BLOCO 1: Encontrar o Python ---
-# Adicionado para podermos chamar o script de documentação
+# nlohmann_json
+CPMAddPackage(
+    NAME nlohmann_json
+    GITHUB_REPOSITORY nlohmann/json
+    VERSION 3.11.2
+)
+
+# Python3
 find_package(Python3 REQUIRED)
 
 # ---- Create executable ----
@@ -73,7 +79,12 @@ target_link_libraries(UltrasoundBenchmark PRIVATE
         Eigen3::Eigen       # Eigen
         yaml-cpp::yaml-cpp  # yaml-cpp
         OpenMP::OpenMP_CXX  # OpenMP
+        nlohmann_json::nlohmann_json
 )
+
+if(WIN32)
+    target_link_libraries(UltrasoundBenchmark PRIVATE ws2_32)
+endif()
 
 # Necessário para std::filesystem no GCC < 9
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
@@ -84,24 +95,18 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSIO
 endif ()
 
 
-# --- NOVO BLOCO 2: Comando Pós-Compilação ---
-# Executa o script documentar.py toda vez que o 'UltrasoundBenchmark'
-# for compilado com sucesso.
+# ---- Post-Build Command ----
 add_custom_command(
         TARGET UltrasoundBenchmark
-        POST_BUILD  # Executa APÓS a compilação
-        COMMAND
-        # O comando que será executado no terminal
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/documentar.py
+        POST_BUILD
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/documentar.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Gerando documentação do projeto via documentar.py..."
 )
 
 
 # ---- Target Properties ----
-set_target_properties(UltrasoundBenchmark PROPERTIES CXX_STANDARD 23) # Já definido globalmente
+set_target_properties(UltrasoundBenchmark PROPERTIES CXX_STANDARD 23)
 
-# Opcional: Otimizações de compilação para Release
 target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Release>:-O3 -DNDEBUG>)
-# Opcional: Flags de debug
 target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Debug>:-g>)

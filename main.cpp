@@ -1,244 +1,239 @@
+#include <chrono>
+#include <cmath>
+#include <filesystem>
+#include <iomanip>
 #include <iostream>
-#include <vector>
+#include <nlohmann/json.hpp>
+#include <sstream>
 #include <string>
-#include <filesystem> // Para manipulação de caminhos (C++17)
-#include <chrono>     // Para timing (embora a maior parte esteja no header agora)
-#include <iomanip>    // Para formatação da tabela
-#include <sstream>    // Para formatar speedup
-#include <omp.h>      // Para OpenMP info
-#include <stdexcept>  // Para std::runtime_error
-#include <algorithm>  // Para std::replace
+#include <vector>
 
-// Inclui o header com a lógica de comparação e funções auxiliares/solvers
-#include "solver_comparison.hpp"
-#include "include/types.hpp"
-#include "include/config.hpp"
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "Ws2_32.lib")
+using SocketType = SOCKET;
+#define INVALID_SOCKET_VAL INVALID_SOCKET
+#define SOCKET_ERROR_VAL SOCKET_ERROR
+#define CLOSE_SOCKET closesocket
+#else
+#include <cstring>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+using SocketType = int;
+#define INVALID_SOCKET_VAL -1
+#define SOCKET_ERROR_VAL -1
+#define CLOSE_SOCKET close
+#endif
 
-// Removida a função create_output_directories daqui pois já existe em solver_comparison.hpp
+#include "include/io_utils.hpp"
+#include "include/solvers.hpp"
 
-// --- Função Principal (SIMPLIFICADA) ---
-int main(int argc, char *argv[]) {
-    std::cout << "======================================================" << std::endl;
-    std::cout << " Comparativo: CGNR Standard vs Pre-condicionado" << std::endl;
-    std::cout << "======================================================" << std::endl;
+using json = nlohmann::json;
 
-    // --- Config Loading Logic ---
-    std::string config_file_path = "config.yaml"; // Default
+// --- Global Variables ---
+Eigen::SparseMatrix<double> H_30;
+Eigen::SparseMatrix<double> H_60;
+double C_factor = 0.0;
 
-    // 1. Check if user provided a path via command line
-    if (argc > 1) {
-        config_file_path = argv[1];
+// --- Helper Functions ---
+
+// Carrega matriz de forma inteligente: Tenta BIN primeiro, senão CSV e salva
+// BIN.
+void load_matrix_smart(const std::string &csv_path, int cols,
+                       Eigen::SparseMatrix<double> &H) {
+  std::string bin_path = csv_path + ".sparse.bin";
+
+  if (std::filesystem::exists(bin_path)) {
+    std::cout << "[INFO] Carregando binario rapido: " << bin_path << "..."
+              << std::endl;
+    H = loadSparseMatrix(bin_path);
+  } else {
+    if (!std::filesystem::exists(csv_path)) {
+      throw std::runtime_error("Arquivo CSV nao encontrado: " + csv_path);
+    }
+    std::cout << "[INFO] Binario nao encontrado. Convertendo CSV (lento): "
+              << csv_path << "..." << std::endl;
+    H = convertCsvToSparse(csv_path, cols);
+
+    std::cout << "[INFO] Salvando binario para uso futuro..." << std::endl;
+    saveSparseMatrix(H, bin_path);
+    std::cout << "[INFO] Binario salvo em: " << bin_path << std::endl;
+  }
+}
+
+double
+calculate_spectral_norm_power_iteration(const Eigen::SparseMatrix<double> &H,
+                                        int iterations = 20) {
+  // Calculates ||H^T H||_2 = lambda_max(H^T * H)
+  Eigen::Index N = H.cols();
+  Eigen::VectorXd b_k = Eigen::VectorXd::Random(N);
+  b_k.normalize();
+
+  for (int i = 0; i < iterations; ++i) {
+    Eigen::VectorXd y = H * b_k;
+    Eigen::VectorXd z = H.transpose() * y;
+    b_k = z.normalized();
+  }
+
+  Eigen::VectorXd y = H * b_k;
+  double lambda_max = y.squaredNorm();
+  return lambda_max;
+}
+
+double calculate_reduction_factor(const Eigen::SparseMatrix<double> &H) {
+  // C = ||H^T H||_2
+  return calculate_spectral_norm_power_iteration(H);
+}
+
+void send_response(SocketType clientSocket, const json &response) {
+  std::string response_str = response.dump();
+  send(clientSocket, response_str.c_str(), (int)response_str.length(), 0);
+}
+
+void handle_client(SocketType clientSocket) {
+  const int buffer_size = 4096 * 16;
+  std::vector<char> buffer(buffer_size);
+  std::string received_data;
+
+  while (true) {
+    int bytesReceived = recv(clientSocket, buffer.data(), buffer_size, 0);
+    if (bytesReceived > 0) {
+      received_data.append(buffer.data(), bytesReceived);
+      try {
+        json request = json::parse(received_data);
+        break;
+      } catch (const json::parse_error &e) {
+        continue;
+      }
+    } else if (bytesReceived == 0) {
+      return;
     } else {
-        // 2. Try to find config.yaml relative to executable or current path
-        std::filesystem::path exe_path(argv[0]);
-        std::filesystem::path search_paths[] = {
-            std::filesystem::current_path() / "config.yaml",
-            exe_path.parent_path() / "config.yaml",
-            exe_path.parent_path().parent_path() / "config.yaml",
-            exe_path.parent_path().parent_path().parent_path() / "config.yaml"
-        };
+      return;
+    }
+  }
 
-        bool found = false;
-        for (const auto& p : search_paths) {
-            if (std::filesystem::exists(p)) {
-                config_file_path = p.string();
-                found = true;
-                break;
-            }
-        }
-        
-        if (!found) {
-             std::cout << "[AVISO] config.yaml nao encontrado nos caminhos padrao. Tentando 'config.yaml' no diretorio atual." << std::endl;
-        }
+  try {
+    json request = json::parse(received_data);
+    std::string model_size = request["model_size"];
+    std::vector<double> signal_vec = request["signal_g"];
+
+    Eigen::VectorXd g_signal =
+        Eigen::Map<Eigen::VectorXd>(signal_vec.data(), signal_vec.size());
+
+    std::cout << "[INFO] Request: Model=" << model_size
+              << ", Signal Size=" << g_signal.size() << std::endl;
+
+    Eigen::SparseMatrix<double> *H = nullptr;
+    if (model_size == "30x30")
+      H = &H_30;
+    else if (model_size == "60x60")
+      H = &H_60;
+
+    if (H == nullptr || H->rows() == 0) {
+      json error_msg = {{"error", "Invalid model size or model not loaded"}};
+      send_response(clientSocket, error_msg);
+      return;
     }
 
-    std::cout << "[INFO] Tentando carregar configuracao de: " << config_file_path << std::endl;
+    int img_dim = (model_size == "30x30") ? 30 : 60;
 
-    std::filesystem::path config_path(config_file_path);
-    Config config;
-    try {
-        config = load_config(config_file_path);
-    } catch (const std::exception& e) {
-        std::cerr << "[ERRO FATAL] Erro ao carregar configuracao: " << e.what() << std::endl;
-        return 1;
+    auto result = run_cgnr_solver_epsilon_save_iters(g_signal, *H, 1e-4, 10, "",
+                                                     "", img_dim, img_dim);
+
+    std::vector<double> image_pixels(result.image.data(),
+                                     result.image.data() + result.image.size());
+
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&now_c), "%Y-%m-%d %H:%M:%S");
+
+    json response = {{"algorithm", "CGNR_CPP"},
+                     {"start_time", "N/A"},
+                     {"end_time", ss.str()},
+                     {"iterations", result.iterations},
+                     {"image_pixels", image_pixels},
+                     {"reduction_factor_C", C_factor},
+                     {"execution_time_ms", result.execution_time_ms}};
+
+    send_response(clientSocket, response);
+    std::cout << "[INFO] Response sent." << std::endl;
+
+  } catch (const std::exception &e) {
+    std::cerr << "[ERRO] Error processing request: " << e.what() << std::endl;
+    json error_msg = {{"error", e.what()}};
+    send_response(clientSocket, error_msg);
+  }
+}
+
+int main() {
+  std::cout << "[INFO] Iniciando Servidor C++..." << std::endl;
+
+  // 1. Load Matrices (Smart Load)
+  try {
+    std::string h30_path = "data/H-2.csv";
+    load_matrix_smart(h30_path, 900, H_30);
+    C_factor = calculate_reduction_factor(H_30);
+    std::cout << "[INFO] H_30 carregada. C_factor: " << C_factor << std::endl;
+
+    std::string h60_path = "data/H-1.csv";
+    load_matrix_smart(h60_path, 3600, H_60);
+    if (C_factor == 0.0)
+      C_factor = calculate_reduction_factor(H_60);
+    std::cout << "[INFO] H_60 carregada." << std::endl;
+
+  } catch (const std::exception &e) {
+    std::cerr << "[ERRO FATAL] Falha ao carregar matrizes: " << e.what()
+              << std::endl;
+    return 1;
+  }
+
+  // 2. Initialize Winsock (Windows Only)
+  int iResult;
+#ifdef _WIN32
+  WSADATA wsaData;
+  iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+  if (iResult != 0)
+    return 1;
+#else
+  iResult = 0;
+#endif
+
+  struct addrinfo *result = NULL, hints;
+#ifdef _WIN32
+  ZeroMemory(&hints, sizeof(hints));
+#else
+  std::memset(&hints, 0, sizeof(hints));
+#endif
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_protocol = IPPROTO_TCP;
+  hints.ai_flags = AI_PASSIVE;
+
+  getaddrinfo(NULL, "8080", &hints, &result);
+  SocketType ListenSocket =
+      socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+  bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
+  freeaddrinfo(result);
+  listen(ListenSocket, SOMAXCONN);
+
+  std::cout << "[READY] C++ Server ouvindo na porta 8080..." << std::endl;
+
+  SocketType ClientSocket = INVALID_SOCKET_VAL;
+  while (true) {
+    ClientSocket = accept(ListenSocket, NULL, NULL);
+    if (ClientSocket != INVALID_SOCKET_VAL) {
+      handle_client(ClientSocket);
+      CLOSE_SOCKET(ClientSocket);
     }
+  }
 
-    if (config.run_pipelines.empty()) {
-        std::cerr << "[ERRO] Nenhum pipeline definido no arquivo de configuração." << std::endl;
-        return 1;
-    }
-
-    // Pega apenas o primeiro pipeline (Sparse_Comparison)
-    const auto &pipeline = config.run_pipelines[0];
-
-    // Prepara o vetor de testes baseado no pipeline
-    std::cout << "\n[INFO] Pipeline selecionado: " << pipeline.name << std::endl;
-    std::cout << "[INFO] Datasets configurados: ";
-    for (const auto &name: pipeline.dataset_names) {
-        std::cout << name << " ";
-    }
-    std::cout << std::endl;
-
-    std::vector<DatasetConfig> tests;
-    for (const auto &dataset_name: pipeline.dataset_names) {
-        std::cout << "[INFO] Processando dataset: " << dataset_name << std::endl;
-        auto it = config.dataset_map.find(dataset_name);
-        if (it != config.dataset_map.end()) {
-            DatasetConfig dataset_config = *it->second; // Make a copy to modify paths
-            std::filesystem::path config_dir = config_path.parent_path();
-            dataset_config.h_matrix_csv = (config_dir / dataset_config.h_matrix_csv).string();
-            dataset_config.g_signal_csv = (config_dir / dataset_config.g_signal_csv).string();
-            tests.push_back(dataset_config);
-            std::cout << "[INFO] Dataset " << dataset_name << " adicionado para processamento" << std::endl;
-        } else {
-            std::cout << "[AVISO] Dataset " << dataset_name << " não encontrado no mapa de configurações" << std::endl;
-        }
-    }
-
-    std::cout << "[INFO] Total de datasets a serem processados: " << tests.size() << std::endl;
-
-    // Configuração OpenMP
-    Eigen::setNbThreads(omp_get_max_threads());
-    std::cout << "\n[INFO] Usando " << Eigen::nbThreads() << " threads para os calculos Eigen.\n" << std::endl;
-
-    // --- Pré-processamento (Apenas garante que o .sparse.bin existe) ---
-    std::cout << "[INFO] Verificando/Criando arquivos binarios esparsos..." << std::endl;
-    for (const auto &config: tests) {
-        std::filesystem::path h_path = config.h_matrix_csv; // Correção aqui: usa h_matrix_csv
-        if (!std::filesystem::exists(h_path)) {
-            std::cerr << "[ERRO] Arquivo CSV da matriz H nao encontrado: " << config.h_matrix_csv << std::endl;
-            return 1;
-        }
-        std::filesystem::path data_dir = h_path.parent_path();
-        std::filesystem::path sparse_bin_fs_path = data_dir / (h_path.filename().string() + ".sparse.bin");
-        std::string sparse_bin_path = sparse_bin_fs_path.string();
-
-        if (!std::filesystem::exists(sparse_bin_fs_path)) {
-            std::cout << "[AVISO] Criando arquivo binario esparso para " << config.h_matrix_csv << " em " <<
-                    sparse_bin_path << "..." << std::endl;
-            try {
-                saveSparseMatrix(convertCsvToSparse(config.h_matrix_csv, config.image_rows * config.image_cols),
-                                 sparse_bin_path);
-                std::cout << "[SUCESSO] Arquivo binario esparso criado: " << sparse_bin_path << std::endl;
-            } catch (const std::exception &e) {
-                std::cerr << "[ERRO] Falha ao criar arquivo binario esparso: " << e.what() << std::endl;
-                return 1;
-            }
-        }
-    }
-    std::cout << "[INFO] Pre-processamento concluido.\n" << std::endl;
-
-    // Padronizar o caminho de saída para corresponder ao que o Python espera
-    std::filesystem::path output_dir = "../output_csv";
-    try {
-        create_output_directories(output_dir); // Usa a função do solver_comparison.hpp
-        std::cout << "[INFO] Estrutura de diretorios criada: " << std::filesystem::absolute(output_dir) << std::endl;
-    } catch (const std::exception &e) {
-        std::cerr << "[ERRO] Nao foi possivel criar os diretorios de saida: " << e.what() << std::endl;
-        return 1;
-    }
-
-    // --- Loop Principal de Testes ---
-    std::vector<std::tuple<std::string, PerformanceMetrics, PerformanceMetrics> > all_results;
-
-    // Verificação adicional para garantir que estamos processando apenas os datasets selecionados
-    std::cout << "\n[INFO] Verificando datasets a serem processados:" << std::endl;
-    for (const auto &test_config: tests) {
-        std::cout << "  - Dataset: " << test_config.name << " (" << test_config.description << ")" << std::endl;
-        bool is_in_pipeline = std::find(pipeline.dataset_names.begin(),
-                                        pipeline.dataset_names.end(),
-                                        test_config.name) != pipeline.dataset_names.end();
-        if (!is_in_pipeline) {
-            std::cout << "[AVISO] Dataset " << test_config.name << " não está no pipeline atual. Ignorando." << std::endl;
-            continue;
-        }
-
-        std::cout << "\n========================================\nINICIANDO TESTE: " << test_config.description <<
-                // Usa .description
-                "\n========================================" << std::endl;
-
-        try {
-            auto [std_metrics, precond_metrics] = run_sparse_comparison(test_config, config.settings);
-            all_results.push_back(std::make_tuple(test_config.description, std_metrics, precond_metrics));
-            std::cout << "Teste " << test_config.description << " concluido com sucesso." << std::endl;
-        } catch (const std::exception &e) {
-            std::cerr << "[ERRO FATAL] Falha ao executar comparacao para o teste " << test_config.description << ": " << e.
-                    what() << std::endl;
-        }
-    }
-
-    // --- Tabela Final de Resultados ---
-    std::cout <<
-            "\n\n======================================================================================================================================================"
-            << std::endl;
-    std::cout << "                                                    RELATORIO COMPARATIVO FINAL" << std::endl;
-    std::cout <<
-            "======================================================================================================================================================"
-            << std::endl;
-    std::cout << std::left
-            << std::setw(22) << "Teste"
-            << std::setw(28) << "Metodo"
-            << std::setw(15) << "RAM (MB)"
-            << std::setw(20) << "T. Carga (ms)"
-            << std::setw(20) << "T. Solver (ms)"
-            << std::setw(12) << "Iteracoes"
-            << std::setw(15) << "Erro Final"
-            << std::setw(15) << "Epsilon Final"
-            << std::setw(15) << "Convergiu"
-            << std::setw(15) << "Speedup"
-            << std::endl;
-    std::cout <<
-            "------------------------------------------------------------------------------------------------------------------------------------------------------"
-            << std::endl;
-
-    for (const auto &[test_name, std_metrics, precond_metrics]: all_results) {
-        auto print_metric = [&](const PerformanceMetrics &m, const std::string &method_name, bool is_baseline) {
-            if (m.load_time_ms <= 0 && m.solve_time_ms <= 0) {
-                std::cout << std::left
-                        << std::setw(22) << (is_baseline ? test_name : "")
-                        << std::setw(28) << method_name
-                        << std::setw(15 + 20 + 20 + 12 + 15 + 15 + 15) << " [FALHOU]"
-                        << std::setw(14) << std::right << (is_baseline ? "BASELINE" : "N/A")
-                        << std::endl;
-                return;
-            }
-
-            std::cout << std::left
-                    << std::setw(22) << (is_baseline ? test_name : "")
-                    << std::setw(28) << method_name
-                    << std::fixed << std::setprecision(2) << std::setw(15) << m.estimated_ram_mb
-                    << std::fixed << std::setprecision(2) << std::setw(20) << m.load_time_ms
-                    << std::fixed << std::setprecision(2) << std::setw(20) << m.solve_time_ms
-                    << std::setw(12) << m.iterations
-                    << std::scientific << std::setprecision(3) << std::setw(14) << m.final_error
-                    << std::scientific << std::setprecision(3) << std::setw(14) << m.final_epsilon
-                    << std::setw(15) << (m.converged ? "Sim" : "Nao (MaxIt)");
-
-            if (is_baseline) {
-                std::cout << std::setw(14) << std::right << "BASELINE";
-            } else if (std_metrics.solve_time_ms > 0 && m.solve_time_ms > 0) {
-                const double speedup = std_metrics.solve_time_ms / m.solve_time_ms;
-                std::stringstream ss;
-                ss << std::fixed << std::setprecision(2) << speedup << "x";
-                std::cout << std::setw(14) << std::right << ss.str();
-            } else {
-                std::cout << std::setw(14) << std::right << "N/A";
-            }
-            std::cout << std::endl;
-        };
-
-        print_metric(std_metrics, "CGNR Standard", true);
-        print_metric(precond_metrics, "CGNR Pre-condicionado", false);
-
-        std::cout <<
-                "------------------------------------------------------------------------------------------------------------------------------------------------------"
-                << std::endl;
-    }
-
-    std::cout << "\nBenchmark concluido." << std::endl;
-    std::cout << "[INFO] Para visualizar os graficos de convergencia, execute:" << std::endl;
-    std::cout << "[INFO] python scripts/plot_convergence.py ../output_csv/metrics" << std::endl;
-    std::cout << "[INFO] Para gerar animacoes da reconstrucao das imagens, execute:" << std::endl;
-    std::cout << "[INFO] python scripts/visualize_iterations.py ../output_csv/images" << std::endl;
-    return 0;
+  CLOSE_SOCKET(ListenSocket);
+#ifdef _WIN32
+  WSACleanup();
+#endif
+  return 0;
 }
