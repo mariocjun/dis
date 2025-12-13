@@ -10,7 +10,10 @@ import numpy as np
 def plot_convergence(metrics_folder, base_names):
     """Plota as curvas de convergência para um ou mais resultados."""
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Prepara pasta de saída
+    plots_folder = Path(metrics_folder) / "plots"
+    plots_folder.mkdir(parents=True, exist_ok=True)
 
     if not base_names:
         # Se nenhum nome base for fornecido, encontra todos os arquivos de histórico
@@ -21,6 +24,7 @@ def plot_convergence(metrics_folder, base_names):
             return
 
         # Extrai os nomes dos testes para a legenda
+        # Ex: convergence_history_60x60_G1_sparse_standard.csv -> 60x60_G1_sparse_standard
         labels = ['_'.join(Path(f).stem.split('_')[2:]) for f in all_files]
         files_to_plot = all_files
     else:
@@ -28,34 +32,54 @@ def plot_convergence(metrics_folder, base_names):
         files_to_plot = [os.path.join(metrics_folder, f"convergence_history_{name}.csv") for name in base_names]
         labels = base_names
 
+    # 1. Plot Combinado (Todos juntos)
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
     for i, file_path in enumerate(files_to_plot):
         try:
             # Carrega os dados: Iteration,ResidualNorm,SolutionNorm,ExecutionTime_ms
             data = np.loadtxt(file_path, delimiter=',', skiprows=1)
+            # Se tiver apenas 1 linha, loadtxt retorna array 1D. Precisamos tratar.
+            if data.ndim == 1:
+                data = data.reshape(1, -1)
+                
             iterations = data[:, 0]
             residual_norm = data[:, 1]
 
             # Usa o nome do arquivo (sem prefixo/sufixo) como legenda
             label = labels[i]
             ax.plot(iterations, residual_norm, marker='o', linestyle='-', markersize=4, label=label)
+            
+            # 2. Plot Individual (Salva um por arquivo)
+            fig_ind, ax_ind = plt.subplots(figsize=(8, 6))
+            ax_ind.plot(iterations, residual_norm, marker='o', linestyle='-', color='tab:blue')
+            ax_ind.set_yscale('log')
+            ax_ind.set_title(f'Convergência: {label}', fontsize=14)
+            ax_ind.set_xlabel('Iteração', fontsize=12)
+            ax_ind.set_ylabel('Norma do Resíduo (log)', fontsize=12)
+            ax_ind.grid(True, which="both", ls="--")
+            
+            output_path_ind = plots_folder / f"plot_{label}.png"
+            fig_ind.savefig(output_path_ind, dpi=150, bbox_inches='tight')
+            plt.close(fig_ind)
 
         except Exception as e:
             print(f"[AVISO] Não foi possível processar o arquivo '{file_path}': {e}")
             continue
 
     ax.set_yscale('log')
-    ax.set_title('Curva de Convergência (Norma do Resíduo)', fontsize=16)
+    ax.set_title('Comparativo de Convergência (Todos)', fontsize=16)
     ax.set_xlabel('Iteração', fontsize=12)
     ax.set_ylabel('Norma do Resíduo (log)', fontsize=12)
     ax.legend(fontsize=10)
     ax.grid(True, which="both", ls="--")
 
-    # Salva o gráfico
-    output_path = Path(metrics_folder).parent / "convergence_plot.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    # Salva o gráfico combinado
+    output_path_combined = plots_folder / "convergence_plot_combined.png"
+    plt.savefig(output_path_combined, dpi=300, bbox_inches='tight')
+    plt.close(fig) # Fecha para liberar memoria
 
-    print(f"\n[SUCESSO] Gráfico de convergência salvo em: {output_path}")
-    plt.show()
+    print(f"\n[SUCESSO] Gráficos de convergência salvos em: {plots_folder}")
 
 
 def main():

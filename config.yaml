@@ -5,6 +5,7 @@ settings:
   output_base_dir: "output_runs/manual_execution" # Diretório base relativo ao diretório de build
   epsilon_tolerance: 1.0e-4
   max_iterations: 10
+  l_curve_iterations: 50 # Numero de iteracoes para calcular a curva L e encontrar o ponto otimo
   save_intermediate_images: true # true para salvar imagem a cada iteração, false para salvar só a final
   num_omp_threads: 8 # 0 para usar o máximo padrão do OpenMP, ou especifique um número
 
@@ -27,7 +28,7 @@ datasets:
   - name: "60x60_A1"
     description: "60x60 (Sinal A-1)"
     h_matrix_csv: "data/H-1.csv"
-    g_signal_csv: "data/A-1.csv"
+    g_signal_csv: "data/A-60x60-1.csv"
     image_rows: 60
     image_cols: 60
 
@@ -48,7 +49,7 @@ datasets:
   - name: "30x30_A1"
     description: "30x30 (Sinal A-1)"
     h_matrix_csv: "data/H-2.csv"
-    g_signal_csv: "data/A-1.csv"
+    g_signal_csv: "data/A-30x30-1.csv"
     image_rows: 30
     image_cols: 30
 
@@ -76,7 +77,7 @@ run_pipelines:
     datasets:
       - "30x30_g1"
       - "30x30_g2"
+      - "30x30_A1"
       - "60x60_G1"
       - "60x60_G2"
       - "60x60_A1"
-      - "30x30_A1"

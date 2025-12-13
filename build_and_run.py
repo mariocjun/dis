@@ -97,7 +97,21 @@ def main():
         print("\nExecution interrupted by user.")
         sys.exit(130)
 
-    # 4. Run Visualization automatically
+    # 4. Automatic Graph Generation (Metrics)
+    print("\n--- Generating Convergence Graphs ---")
+    plot_script = os.path.join(project_root, "scripts", "plot_convergence.py")
+    metrics_dir = os.path.join(output_path, "metrics")
+    
+    if os.path.exists(metrics_dir) and len(os.listdir(metrics_dir)) > 0:
+        cmd_plot = ["python", plot_script, metrics_dir]
+        try:
+             subprocess.run(cmd_plot, check=True)
+        except subprocess.CalledProcessError as e:
+             print(f"Graph generation failed: {e}")
+    else:
+        print(f"No metrics found in {metrics_dir}, skipping graphs.")
+
+    # 5. Run Visualization automatically (Images/Animations)
     print("\n--- Starting Visualization ---")
     visualize_script = os.path.join(project_root, "scripts", "visualize_iterations.py")
     images_dir = os.path.join(output_path, "images")

@@ -46,6 +46,14 @@ def create_animation(image_folder, base_name, output_folder):
             image = np.frombuffer(image_buffer, dtype='uint8')
             image = image.reshape(fig.canvas.get_width_height()[::-1] + (4,))
             images.append(image[:, :, :3]) # Converte de RGBA para RGB
+            
+            # --- NOVO: Salva o frame individual como PNG ---
+            frames_dir = Path(output_folder).parent / "frames" / base_name
+            frames_dir.mkdir(parents=True, exist_ok=True)
+            frame_path = frames_dir / f"iter_{i}.png"
+            fig.savefig(frame_path, dpi=100, bbox_inches='tight')
+            # -----------------------------------------------
+
             plt.close(fig)
 
         except Exception as e:
@@ -58,6 +66,7 @@ def create_animation(image_folder, base_name, output_folder):
 
     # Salva o GIF
     output_path = os.path.join(output_folder, f"{base_name}_animation.gif")
+    print(f"  [DEBUG] Saving GIF with {len(images)} frames to {output_path}")
     try:
         imageio.mimsave(output_path, images, fps=5)
         print(f"  [SUCESSO] Animação salva em: {output_path}")
