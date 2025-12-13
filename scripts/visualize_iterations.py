@@ -40,19 +40,20 @@ def create_animation(image_folder, base_name, output_folder):
             # Adiciona uma colorbar para referência de intensidade
             fig.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
 
-            # Converte o plot para uma imagem em memória
-            fig.canvas.draw()
-            image_buffer = fig.canvas.buffer_rgba()
-            image = np.frombuffer(image_buffer, dtype='uint8')
-            image = image.reshape(fig.canvas.get_width_height()[::-1] + (4,))
-            images.append(image[:, :, :3]) # Converte de RGBA para RGB
-            
             # --- NOVO: Salva o frame individual como PNG ---
             frames_dir = Path(output_folder).parent / "frames" / base_name
             frames_dir.mkdir(parents=True, exist_ok=True)
             frame_path = frames_dir / f"iter_{i}.png"
-            fig.savefig(frame_path, dpi=100, bbox_inches='tight')
+            fig.savefig(frame_path, dpi=100) # Removed bbox_inches='tight' for consistency
             # -----------------------------------------------
+
+            # Converte o plot para imagem para o GIF usando o mesmo output do savefig
+            import io
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', dpi=100) # Removed bbox_inches='tight' for consistency
+            buf.seek(0)
+            image = imageio.imread(buf)
+            images.append(image)
 
             plt.close(fig)
 

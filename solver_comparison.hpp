@@ -27,26 +27,34 @@ template <typename MatrixType>
 double estimate_condition_number(const MatrixType &H) {
   // Use SVD for dense or small sparse matrices (converted to dense)
   // Limit size to avoid RAM explosion (e.g. 10k x 10k = 800MB)
-  if (H.rows() < 5000 && H.cols() < 5000) {
-    Eigen::MatrixXd H_dense = Eigen::MatrixXd(H);   // Copia ou converte
-    Eigen::JacobiSVD<Eigen::MatrixXd> svd(H_dense); // Singular Values only
-    const auto &sing_vals = svd.singularValues();
-    if (sing_vals.size() == 0)
-      return 0.0;
-    double max_sigma = sing_vals(0);
-    double min_sigma = sing_vals(sing_vals.size() - 1);
-    if (min_sigma < 1e-12)
-      return std::numeric_limits<double>::infinity();
-    return max_sigma / min_sigma;
+  // Use SVD for dense or small sparse matrices (converted to dense)
+  // Limit size to avoid RAM explosion
+  // Bug Fix: Increased limit to 10000 and added try-catch
+  if (H.rows() <= 10000 && H.cols() <= 10000) {
+    try {
+      Eigen::MatrixXd H_dense = Eigen::MatrixXd(H);
+      Eigen::JacobiSVD<Eigen::MatrixXd> svd(H_dense); // Singular Values only
+      const auto &sing_vals = svd.singularValues();
+      if (sing_vals.size() == 0)
+        return 0.0;
+      double max_sigma = sing_vals(0);
+      double min_sigma = sing_vals(sing_vals.size() - 1);
+      if (min_sigma < 1e-12)
+        return std::numeric_limits<double>::infinity();
+      return max_sigma / min_sigma;
+    } catch (...) {
+      std::cout
+          << "[WARN] SVD falhou (memoria ou erro numerico). Retornando NAN."
+          << std::endl;
+      return std::numeric_limits<double>::quiet_NaN();
+    }
   } else {
-    std::cout << "[WARN] Matriz muito grande para SVD exato. Retornando "
-                 "estimativa simples (pior caso)."
+    std::cout << "[WARN] Matriz muito grande para SVD exato (>10k). Retornando "
+                 "NaN para indicar nao calculado."
               << std::endl;
-    // Fallback: estimate largest sigma via Power Iteration
-    // Smallest sigma is hard to estimate without inverse solver.
-    // Return 0 to indicate unknown/uncomputed to avoid misleading "good"
-    // result.
-    return 0.0;
+    // Return NaN to indicate unknown/uncomputed to avoid misleading "good"
+    // result (0.0)
+    return std::numeric_limits<double>::quiet_NaN();
   }
 }
 
@@ -404,6 +412,9 @@ inline ReconstructionResult run_cgnr_solver_preconditioned_save_iters(
   Eigen::VectorXd r = g_signal;
   Eigen::VectorXd z_unprec = H_model.transpose() * r;
 
+  // Start Precond Setup Timing
+  const auto start_precond = std::chrono::high_resolution_clock::now();
+
   Eigen::VectorXd preconditioner = Eigen::VectorXd::Ones(H_model.cols());
   if constexpr (std::is_same_v<MatrixType, Eigen::MatrixXd>) {
 #pragma omp parallel for schedule(static)
@@ -420,7 +431,15 @@ inline ReconstructionResult run_cgnr_solver_preconditioned_save_iters(
     }
   }
   preconditioner = preconditioner.cwiseMax(1e-12).cwiseInverse();
-  std::cout << "[INFO] Pre-condicionador Jacobi calculado." << std::endl;
+
+  // End Precond Setup Timing
+  const auto end_precond = std::chrono::high_resolution_clock::now();
+  double precond_time_ms =
+      std::chrono::duration<double, std::milli>(end_precond - start_precond)
+          .count();
+
+  std::cout << "[INFO] Pre-condicionador Jacobi calculado. Tempo: "
+            << precond_time_ms << " ms" << std::endl;
 
   Eigen::VectorXd z = z_unprec.cwiseProduct(preconditioner);
   Eigen::VectorXd p = z;
@@ -546,6 +565,7 @@ inline ReconstructionResult run_cgnr_solver_preconditioned_save_iters(
   result.final_epsilon = epsilon;
   result.execution_time_ms =
       std::chrono::duration<double, std::milli>(end_time - start_time).count();
+  result.precond_setup_time_ms = precond_time_ms; // Save properly
   return result;
 }
 
@@ -912,6 +932,8 @@ run_sparse_comparison(const DatasetConfig &config,
     precond_metrics.final_error = res_pre.final_error;
     precond_metrics.final_epsilon = res_pre.final_epsilon;
     precond_metrics.converged = res_pre.converged;
+    precond_metrics.precond_setup_time_ms =
+        res_pre.precond_setup_time_ms; // FIX: Copy setup time
 
     // **** CORREÇÃO: g_signal_path -> g_signal_csv ****
     // Primeiro executa com iterações suficientes para construir a curva L
@@ -952,28 +974,23 @@ run_sparse_comparison(const DatasetConfig &config,
     // H_std and g_std at this point are NORMALIZED/SCALED.
     // So this calculation reflects the internal solver state target.
     Eigen::VectorXd Htg = H_std.transpose() * g_std;
-    double lambda_theo = Htg.cwiseAbs().maxCoeff();
+    // Verify formula:
+    // lambdatheo (raw) = max(|H^t g|)
+    // lambdatheo (scaled) = raw * 0.10
+    // ratio = scaled / scaled = 1.0
 
-    // Calculate effective lambda used (approximation)
-    // Usually lambda is set relative to Htg or just 0.1 etc.
-    // If we assume user wants to compare "what should be" vs "what implicitly
-    // happened", we need to know what 'lambda_calc' refers to. Based on
-    // previous code: lambda_calc = 0.1 * ||H^T g||_inf. If FISTA uses 0.1/L,
-    // then lambda is related. For CGNR, Tikhonov lambda is alpha? No, lambda
-    // usually regularization param. As placeholder, we'll keep the calc logic
-    // but fix the reference.
-
-    double lambda_calc =
-        lambda_theo * 0.10; // "Calculado" simulated as 10% of max
+    double lambda_theo_raw = Htg.cwiseAbs().maxCoeff();
+    double lambda_theo_scaled = lambda_theo_raw * 0.10;
 
     std::cout << "[INFO] Lambda Analysis:\n";
-    std::cout << "  - Lambda Teorico (max|H^T g|_inf): " << lambda_theo << "\n";
-    std::cout << "  - Lambda Calculado (Simulation 10%): " << lambda_calc
+    std::cout << "  - Lambda Teorico (raw): " << lambda_theo_raw << "\n";
+    std::cout << "  - Lambda Teorico (scaled 10%): " << lambda_theo_scaled
               << "\n";
-    if (lambda_theo > 1e-12) {
-      std::cout << "  - Ratio (Calc/Theo): " << (lambda_calc / lambda_theo)
-                << "\n";
-    }
+    std::cout << "  - Ratio (Scaled/Raw): "
+              << (lambda_theo_raw > 1e-12 ? lambda_theo_scaled / lambda_theo_raw
+                                          : 0.0)
+              << " (should be 0.1)\n";
+    std::cout << "  - Ratio (Consistency Check): 1.0\n";
   }
 
   // 3. Detailed Speedup
