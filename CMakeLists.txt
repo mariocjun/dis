@@ -92,7 +92,7 @@ add_custom_command(
         POST_BUILD  # Executa APÓS a compilação
         COMMAND
         # O comando que será executado no terminal
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/documentar.py
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/documentar.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Gerando documentação do projeto via documentar.py..."
 )

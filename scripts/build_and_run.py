@@ -4,6 +4,8 @@ import sys
 import platform
 import datetime
 import yaml
+import shutil
+import argparse
 
 def run_command(command, cwd=None):
     """Runs a shell command and prints its output."""
@@ -22,9 +24,38 @@ def run_command(command, cwd=None):
         sys.exit(e.returncode)
 
 def main():
-    project_root = os.path.dirname(os.path.abspath(__file__))
+    parser = argparse.ArgumentParser(description="Build and Run Ultrasound Benchmark")
+    parser.add_argument("--debug", action="store_true", help="Build in Debug mode")
+    parser.add_argument("--release", action="store_true", help="Build in Release mode")
+    parser.add_argument("--clean", action="store_true", help="Clean build directory before building")
+    args = parser.parse_args()
+
+    # Default to Release if neither or Release is specified
+    build_type = "Debug" if args.debug else "Release"
+    
+    # Fix: Script is in scripts/, so root is one level up
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     build_dir = os.path.join(project_root, "build")
     
+    build_dir = os.path.join(project_root, "build")
+    
+    def remove_readonly(func, path, excinfo):
+        """Error handler for shutil.rmtree to remove read-only files (like git objects)"""
+        import stat
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+
+    if args.clean:
+        if os.path.exists(build_dir):
+            print(f"Cleaning build directory: {build_dir}")
+            try:
+                # Use onerror handler to fix permission issues on Windows
+                shutil.rmtree(build_dir, onerror=remove_readonly)
+            except Exception as e:
+                print(f"Warning: Failed to clean build directory: {e}")
+        else:
+            print("Build directory does not exist, nothing to clean.")
+
     # 1. Parse config to get parameters for folder naming
     config_path = os.path.join(project_root, "config.yaml")
     try:
@@ -37,7 +68,7 @@ def main():
             
             # Format numbers for filename (scientific to simplified if needed)
             tol_str = f"{tol:.0e}" if isinstance(tol, float) else str(tol)
-            tol_str = tol_str.replace("e-0", "e-").replace(".", "") # simplify 1e-06 -> 1e-6 approx or keep as is
+            tol_str = tol_str.replace("e-0", "e-").replace(".", "") 
             
             # Timestamp
             now = datetime.datetime.now()
@@ -45,7 +76,6 @@ def main():
             
             # Folder Name: DD_MM_AAAA_HH_MIN_tol_e-4_ite_10_omp_8
             folder_name = f"{timestamp}_tol_{tol}_ite_{ite}_omp_{omp}"
-            # Sanitize just in case
             folder_name = folder_name.replace(" ", "_").replace(":", "")
             
             output_base = "output_runs"
@@ -62,22 +92,22 @@ def main():
     if platform.system() == "Windows":
         exe_name += ".exe"
     
-    print(f"Configuring CMake in: {build_dir}")
-    run_command(["cmake", "-S", ".", "-B", "build"], cwd=project_root)
+    print(f"Configuring CMake in: {build_dir} with Build Type: {build_type}")
     
-    print("Building project...")
-    run_command(["cmake", "--build", "build", "--config", "Release"], cwd=project_root)
+    # Configure command (Ninja is single-config so we must pass CMAKE_BUILD_TYPE here)
+    run_command(["cmake", "-S", ".", "-B", "build", f"-DCMAKE_BUILD_TYPE={build_type}"], cwd=project_root)
+    
+    print(f"Building project ({build_type})...")
+    # Build command
+    run_command(["cmake", "--build", "build", "--config", build_type], cwd=project_root)
     
     # Find Executable
     exe_path = os.path.join(build_dir, exe_name)
+    # Check subfolders for Multi-Config generators (like VS)
     if not os.path.exists(exe_path):
-        exe_path_release = os.path.join(build_dir, "Release", exe_name)
-        if os.path.exists(exe_path_release):
-            exe_path = exe_path_release
-        else:
-            exe_path_debug = os.path.join(build_dir, "Debug", exe_name)
-            if os.path.exists(exe_path_debug):
-                exe_path = exe_path_debug
+        exe_path_typed = os.path.join(build_dir, build_type, exe_name)
+        if os.path.exists(exe_path_typed):
+            exe_path = exe_path_typed
     
     if not os.path.exists(exe_path):
         print(f"Error: Could not find executable at {exe_path}")
