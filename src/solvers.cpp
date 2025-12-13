@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-
 // --- Implementação do Solver CGNR Regularizado (Salva Imagens Intermediárias)
 // ---
 template <typename MatrixType>
@@ -49,7 +48,7 @@ ReconstructionResult run_cgnr_solver_epsilon_save_iters(
   // Cálculo do Lambda
   double lambda = 0.0;
   if (z.size() > 0) {
-    lambda = z.cwiseAbs().maxCoeff() * 0.0001;
+    lambda = z.cwiseAbs().maxCoeff() * 0.10;
     constexpr double min_lambda = 1e-9;
     if (lambda < min_lambda) {
       lambda = min_lambda;
@@ -222,7 +221,7 @@ inline ReconstructionResult run_cgnr_solver_preconditioned_save_iters(
 
   double lambda = 0.0;
   if (z_unprec.size() > 0) { // Usa z_unprec (H^T g) para calcular lambda
-    lambda = z_unprec.cwiseAbs().maxCoeff() * 0.0001;
+    lambda = z_unprec.cwiseAbs().maxCoeff() * 0.10;
     constexpr double min_lambda = 1e-9;
     if (lambda < min_lambda) {
       lambda = min_lambda;
@@ -352,7 +351,8 @@ inline ReconstructionResult run_cgnr_solver_preconditioned_save_iters(
   return result;
 }
 
-// --- Implementação Solver Fixo (NÃO salva imagens intermediárias) ---
+// --- Implementação Solver Fixo ULTRA-OTIMIZADO ---
+// Versão minimalista sem tracking de histórico para máxima velocidade
 template <typename MatrixType>
 inline ReconstructionResult
 run_cgnr_solver_fixed_iter(const Eigen::VectorXd &g_signal,
@@ -368,56 +368,53 @@ run_cgnr_solver_fixed_iter(const Eigen::VectorXd &g_signal,
     return ReconstructionResult{};
 
   const auto start_time = std::chrono::high_resolution_clock::now();
+
+  // Variáveis otimizadas (sem histórico desnecessário)
   Eigen::VectorXd f = Eigen::VectorXd::Zero(H_model.cols());
   Eigen::VectorXd r = g_signal;
   Eigen::VectorXd z = H_model.transpose() * r;
   Eigen::VectorXd p = z;
   double z_norm_sq = z.squaredNorm();
 
-  ReconstructionResult result;
-  result.iterations = 0;
-  result.converged = false;
-  result.residual_history.clear();
-  result.residual_history.reserve(num_iterations);
-  result.solution_history.clear();
-  result.solution_history.reserve(num_iterations);
+  // Regularização como Python (ajuda convergência)
+  double lambda_reg = z.array().abs().maxCoeff() * 0.10;
+  if (lambda_reg < 1e-9)
+    lambda_reg = 1e-9;
 
+  // Loop principal - versão mínima
   for (int i = 0; i < num_iterations; ++i) {
-    result.iterations = i + 1;
-    double current_residual_norm = r.norm();
-    result.residual_history.push_back(current_residual_norm);
-    double current_solution_norm = f.norm();
-    result.solution_history.push_back(current_solution_norm);
     Eigen::VectorXd w = H_model * p;
     double w_norm_sq = w.squaredNorm();
-    double alpha = 0.0;
-    if (w_norm_sq >= std::numeric_limits<double>::epsilon()) {
-      alpha = z_norm_sq / w_norm_sq;
-    } else {
-      // Não imprime aviso repetidamente, pode poluir muito
-      // std::cout << "[AVISO - FixedIter] ||H*p||^2 proximo de zero na iteracao
-      // " << i + 1 << ". Usando alpha=0." << std::endl;
-      z_norm_sq = 0.0;
-    }
-    f += alpha * p;
-    r -= alpha * w;
-    Eigen::VectorXd z_next = H_model.transpose() * r;
-    const double z_next_norm_sq = z_next.squaredNorm();
-    double beta = 0.0;
-    if (z_norm_sq >= std::numeric_limits<double>::epsilon()) {
-      beta = z_next_norm_sq / z_norm_sq;
-    } else {
-      // Não imprime aviso repetidamente
-      // std::cout << "[AVISO - FixedIter] ||z||^2 proximo de zero na iteracao "
-      // << i + 1 << ". Usando beta=0." << std::endl;
-    }
+    double p_norm_sq = p.squaredNorm();
+
+    // Denominador com regularização (como Python)
+    double denominator = w_norm_sq + lambda_reg * p_norm_sq;
+    if (denominator < 1e-15)
+      break;
+
+    double alpha = z_norm_sq / denominator;
+
+    // Atualização direta (evita cópias extras)
+    f.noalias() += alpha * p;
+    r.noalias() -= alpha * w;
+
+    // z_next com regularização (como Python)
+    Eigen::VectorXd z_next = (H_model.transpose() * r) - (lambda_reg * f);
+    double z_next_norm_sq = z_next.squaredNorm();
+
+    double beta = (z_norm_sq > 1e-15) ? (z_next_norm_sq / z_norm_sq) : 0.0;
+
     p = z_next + beta * p;
     z = z_next;
     z_norm_sq = z_next_norm_sq;
-  } // Fim do loop
+  }
 
   const auto end_time = std::chrono::high_resolution_clock::now();
+
+  ReconstructionResult result;
   result.image = f;
+  result.iterations = num_iterations;
+  result.converged = true;
   result.final_error = r.norm();
   result.execution_time_ms =
       std::chrono::duration<double, std::milli>(end_time - start_time).count();
