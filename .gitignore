@@ -2,7 +2,7 @@ __pycache__/
 /build
 .idea
 .venv
-/output_csv
+/output_runs
 /data/
 .idea/**/workspace.xml
 .idea/**/tasks.xml

@@ -2,11 +2,11 @@
 
 # Configurações Globais do Benchmark
 settings:
-  output_base_dir: "output"  # Diretório base relativo ao diretório de build
-  epsilon_tolerance: 1.0e-6
-  max_iterations: 1000
+  output_base_dir: "output_runs/manual_execution" # Diretório base relativo ao diretório de build
+  epsilon_tolerance: 1.0e-4
+  max_iterations: 10
   save_intermediate_images: true # true para salvar imagem a cada iteração, false para salvar só a final
-  num_omp_threads: 0           # 0 para usar o máximo padrão do OpenMP, ou especifique um número
+  num_omp_threads: 8 # 0 para usar o máximo padrão do OpenMP, ou especifique um número
 
 # Definição dos Conjuntos de Teste Disponíveis
 datasets:
@@ -24,6 +24,13 @@ datasets:
     image_rows: 60
     image_cols: 60
 
+  - name: "60x60_A1"
+    description: "60x60 (Sinal A-1)"
+    h_matrix_csv: "data/H-1.csv"
+    g_signal_csv: "data/A-1.csv"
+    image_rows: 60
+    image_cols: 60
+
   - name: "30x30_g1"
     description: "30x30 (Sinal g-1)"
     h_matrix_csv: "data/H-2.csv"
@@ -35,6 +42,13 @@ datasets:
     description: "30x30 (Sinal g-2)"
     h_matrix_csv: "data/H-2.csv"
     g_signal_csv: "data/g-30x30-2.csv"
+    image_rows: 30
+    image_cols: 30
+
+  - name: "30x30_A1"
+    description: "30x30 (Sinal A-1)"
+    h_matrix_csv: "data/H-2.csv"
+    g_signal_csv: "data/A-1.csv"
     image_rows: 30
     image_cols: 30
 
@@ -61,3 +75,8 @@ run_pipelines:
       - "sparse_jacobi"
     datasets:
       - "30x30_g1"
+      - "30x30_g2"
+      - "60x60_G1"
+      - "60x60_G2"
+      - "60x60_A1"
+      - "30x30_A1"
