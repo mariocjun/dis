@@ -3,7 +3,7 @@
 # Configurações Globais do Benchmark
 settings:
   output_base_dir: "output_runs/manual_execution" # Diretório base relativo ao diretório de build
-  epsilon_tolerance: 1.0e-6
+  epsilon_tolerance: 1.0e-4
   max_iterations: 10
   l_curve_iterations: 10 # Numero de iteracoes para calcular a curva L e encontrar o ponto otimo
   save_intermediate_images: true # true para salvar imagem a cada iteração, false para salvar só a final
@@ -81,3 +81,19 @@ run_pipelines:
       - "60x60_G1"
       - "60x60_G2"
       - "60x60_A1"
+
+# Configuracoes do Scheduler para controle de saturacao
+scheduler:
+  max_concurrent_jobs: 4 # Maximo de jobs em paralelo
+  max_threads_per_job: 2 # Threads por job (OpenMP)
+  max_ram_mb: 8192 # Limite de RAM em MB
+  queue_policy: "fifo" # fifo ou shortest_first
+
+# Configuracoes dos Servidores HTTP
+servers:
+  python:
+    host: "0.0.0.0"
+    port: 5001
+  cpp:
+    host: "0.0.0.0"
+    port: 5002

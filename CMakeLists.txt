@@ -55,6 +55,20 @@ CPMAddPackage(
 # OpenMP
 find_package(OpenMP REQUIRED)
 
+# cpp-httplib (header-only HTTP server library)
+CPMAddPackage(
+        NAME httplib
+        GIT_REPOSITORY "https://github.com/yhirose/cpp-httplib.git"
+        GIT_TAG "v0.18.3"
+)
+
+# nlohmann/json (header-only JSON library)
+CPMAddPackage(
+        NAME nlohmann_json
+        GIT_REPOSITORY "https://github.com/nlohmann/json.git"
+        GIT_TAG "v3.11.3"
+)
+
 # --- NOVO BLOCO 1: Encontrar o Python ---
 # Adicionado para podermos chamar o script de documentação
 find_package(Python3 REQUIRED)
@@ -101,9 +115,59 @@ add_custom_command(
 
 
 # ---- Target Properties ----
-set_target_properties(UltrasoundBenchmark PROPERTIES CXX_STANDARD 23) # Já definido globalmente
+set_target_properties(UltrasoundBenchmark PROPERTIES CXX_STANDARD 23)
 
-# Opcional: Otimizações de compilação para Release
-target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Release>:-O3 -DNDEBUG>)
-# Opcional: Flags de debug
-target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Debug>:-g>)
+# Compiler-specific optimization flags
+if(MSVC)
+    target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Release>:/O2 /DNDEBUG>)
+    target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Debug>:/Zi>)
+else()
+    target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Release>:-O3 -DNDEBUG>)
+    target_compile_options(UltrasoundBenchmark PRIVATE $<$<CONFIG:Debug>:-g>)
+endif()
+
+# ---- HTTP Server Executable ----
+add_executable(UltrasoundServerHTTP
+        server/cpp_http_server.cpp
+        src/config.cpp
+        src/io_utils.cpp
+        src/solvers.cpp
+        src/utils.cpp
+)
+
+# Include directories for HTTP server
+target_include_directories(UltrasoundServerHTTP PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${httplib_SOURCE_DIR}
+        ${nlohmann_json_SOURCE_DIR}/include
+)
+
+# Link libraries for HTTP server
+target_link_libraries(UltrasoundServerHTTP PRIVATE
+        Eigen3::Eigen
+        yaml-cpp::yaml-cpp
+        OpenMP::OpenMP_CXX
+)
+
+# Windows needs ws2_32 for networking
+if(WIN32)
+    target_link_libraries(UltrasoundServerHTTP PRIVATE ws2_32)
+endif()
+
+# Filesystem for older compilers
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+    target_link_libraries(UltrasoundServerHTTP PRIVATE -lstdc++fs)
+endif ()
+
+# Set C++ standard
+set_target_properties(UltrasoundServerHTTP PROPERTIES CXX_STANDARD 23)
+
+# Compiler-specific optimization flags
+if(MSVC)
+    target_compile_options(UltrasoundServerHTTP PRIVATE $<$<CONFIG:Release>:/O2 /DNDEBUG>)
+    target_compile_options(UltrasoundServerHTTP PRIVATE $<$<CONFIG:Debug>:/Zi>)
+else()
+    target_compile_options(UltrasoundServerHTTP PRIVATE $<$<CONFIG:Release>:-O3 -DNDEBUG>)
+    target_compile_options(UltrasoundServerHTTP PRIVATE $<$<CONFIG:Debug>:-g>)
+endif()

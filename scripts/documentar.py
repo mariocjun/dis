@@ -8,7 +8,7 @@ EXT_ORDER = ["txt", "cpp", "hpp", "py", "yaml", "csv", "sh"]
 MAX_CSV_SIZE = 10 * 1024
 
 # Pastas a serem ignoradas (Adicione aqui as pastas que deseja pular)
-IGNORE_DIRS = ["cmake", ".venv", "__pycache__", "README", "doc", "build", "cmake-build-debug", ".idea", ".git"]
+IGNORE_DIRS = ["cmake", ".venv", "__pycache__", "README", "doc", "build", "cmake-build-debug", ".idea", ".git", "output_runs"]
 IGNORE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp", ".ico", ".svg", ".gitignore", ".gitattributes", ".gitmodules"]
 
 FENCE = chr(96) + chr(96) + chr(96)
