@@ -58,3 +58,4 @@ fabric.properties
 *.iml
 out
 gen
+build_log.txt

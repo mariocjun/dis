@@ -114,18 +114,54 @@ def main():
         sys.exit(1)
         
     # 3. Run Executable with Custom Output Path
+    # 3. Run Executable with Custom Output Path
     print(f"Executing: {exe_path}")
-    # Pass config file AND output directory
+    print(f"Output Directory: {output_path}")
+
+    # Ensure output directory exists so we can create the log file
+    os.makedirs(output_path, exist_ok=True)
+    log_file_path = os.path.join(output_path, "execution.log")
+
     cmd = [exe_path, "config.yaml", output_path]
     
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Application finished with error code: {e.returncode}")
-        sys.exit(e.returncode)
-    except KeyboardInterrupt:
-        print("\nExecution interrupted by user.")
-        sys.exit(130)
+    print(f"Logging execution to: {log_file_path}")
+    
+    with open(log_file_path, 'w', encoding='utf-8') as log_file:
+        try:
+            # Use Popen to capture output in real-time
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, # Merge stderr into stdout
+                text=True,
+                bufsize=1, # Line buffered
+                encoding='utf-8',
+                errors='replace' # Handle encoding errors gracefully
+            )
+            
+            # Read line by line
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if line:
+                    # Print to console
+                    print(line, end='', flush=True)
+                    # Write to file
+                    log_file.write(line)
+                    log_file.flush() # Ensure it's written immediately
+
+            return_code = process.poll()
+            if return_code != 0:
+                print(f"Application finished with error code: {return_code}")
+                sys.exit(return_code)
+
+        except KeyboardInterrupt:
+            print("\nExecution interrupted by user.")
+            sys.exit(130)
+        except Exception as e:
+             print(f"Error occurred during execution: {e}")
+             sys.exit(1)
 
     # 4. Automatic Graph Generation (Metrics)
     print("\n--- Generating Convergence Graphs ---")

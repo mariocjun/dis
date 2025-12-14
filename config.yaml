@@ -7,7 +7,7 @@ settings:
   max_iterations: 10
   l_curve_iterations: 10 # Numero de iteracoes para calcular a curva L e encontrar o ponto otimo
   save_intermediate_images: true # true para salvar imagem a cada iteração, false para salvar só a final
-  num_omp_threads: 4 # 0 para usar o máximo padrão do OpenMP, ou especifique um número
+  num_omp_threads: 8 # 0 para usar o máximo padrão do OpenMP, ou especifique um número
 
 # Definição dos Conjuntos de Teste Disponíveis
 datasets:
@@ -72,7 +72,7 @@ run_pipelines:
   - name: "Sparse_Comparison"
     description: "Compara os metodos esparsos CGNR e Jacobi"
     methods:
-      #  - "sparse_standard"
+      - "sparse_standard"
       - "sparse_jacobi"
     datasets:
       - "30x30_g1"

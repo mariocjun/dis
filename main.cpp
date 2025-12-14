@@ -106,7 +106,7 @@ int main(int argc, char *argv[]) {
                 << " adicionado para processamento" << std::endl;
     } else {
       std::cout << "[AVISO] Dataset " << dataset_name
-                << " não encontrado no mapa de configurações" << std::endl;
+                << " nao encontrado no mapa de configuracoes" << std::endl;
     }
   }
 
@@ -114,9 +114,17 @@ int main(int argc, char *argv[]) {
             << std::endl;
 
   // Configuração OpenMP
-  Eigen::setNbThreads(omp_get_max_threads());
-  std::cout << "\n[INFO] Usando " << Eigen::nbThreads()
-            << " threads para os calculos Eigen.\n"
+  int num_threads_to_use = config.settings.num_omp_threads;
+  if (num_threads_to_use <= 0) {
+    num_threads_to_use = omp_get_max_threads();
+  }
+
+  Eigen::setNbThreads(num_threads_to_use);
+  omp_set_num_threads(num_threads_to_use);
+
+  std::cout << "\n[INFO] Usando " << num_threads_to_use
+            << " threads para os calculos Eigen e OpenMP (Max disponivel: "
+            << omp_get_max_threads() << ").\n"
             << std::endl;
 
   // --- Pré-processamento (Apenas garante que o .sparse.bin existe) ---
@@ -191,7 +199,7 @@ int main(int argc, char *argv[]) {
                   test_config.name) != pipeline.dataset_names.end();
     if (!is_in_pipeline) {
       std::cout << "[AVISO] Dataset " << test_config.name
-                << " não está no pipeline atual. Ignorando." << std::endl;
+                << " nao esta no pipeline atual. Ignorando." << std::endl;
       continue;
     }
 

@@ -6,6 +6,8 @@
 cmake_minimum_required(VERSION 3.23)
 cmake_policy(VERSION 3.23)
 
+include_guard(GLOBAL)
+
 # Garante compatibilidade com pacotes antigos que pedem < 3.5
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
