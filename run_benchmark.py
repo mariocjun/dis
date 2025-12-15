@@ -156,6 +156,9 @@ class BenchmarkOrchestrator:
         if target_server == 'python' or target_server is None: targets.append(('python', self.python_port))
         if target_server == 'cpp' or target_server is None: targets.append(('cpp', self.cpp_port))
 
+        # Demo mode prefixes use fixed gain=1.0, manual mode uses random gain
+        is_demo_job = job_prefix in ["sanity", "race_30", "race_60", "sat"]
+        
         for srv_name, port in targets:
             for i in range(concurrency):
                 cmd = [
@@ -163,8 +166,13 @@ class BenchmarkOrchestrator:
                     "--seed", str(42 + i), # Deterministic seeds
                     "--num-jobs", str(num_jobs),
                     "--output-dir", str(self.output_dir),
-                    "--datasets"
-                ] + datasets
+                ]
+                
+                # Fixed gain=1.0 for demo mode, random for manual
+                if is_demo_job:
+                    cmd.extend(["--gain-min", "1.0", "--gain-max", "1.0"])
+                
+                cmd.extend(["--datasets"] + datasets)
                 
                 if srv_name == 'python': cmd.extend(["--python-only", "--python-url", f"http://localhost:{port}"])
                 else: cmd.extend(["--cpp-only", "--cpp-url", f"http://localhost:{port}"])

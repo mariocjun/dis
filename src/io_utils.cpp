@@ -497,8 +497,8 @@ void saveImageVectorToCsv(const Eigen::VectorXd &vec,
 
   for (int i = 0; i < img_rows; ++i) {
     for (int j = 0; j < img_cols; ++j) {
-      long long index =
-          static_cast<long long>(j) * img_rows + i; // ColMajor Indexing
+      long long index = static_cast<long long>(i) * img_cols +
+                        j; // RowMajor Indexing (same as Python reshape)
       if (index < vec.size()) {
         file << vec(index);
       } else {
