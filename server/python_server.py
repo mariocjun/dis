@@ -151,6 +151,24 @@ def save_iteration_images(iteration_images: list, job_id: str, rows: int, cols: 
         np.savetxt(csv_path, img_2d, delimiter=',', fmt='%.10e')
 
 
+def save_lcurve_csv(job_id: str, residual_history: list, solution_history: list):
+    """Save L-curve data to CSV for proper visualization.
+    
+    Format: Iteration,SolutionNorm,ResidualNorm
+    This allows generating proper L-curve plots (residual norm vs solution norm).
+    """
+    images_dir = state.output_dir / 'images'
+    csv_path = images_dir / f"{job_id}_lcurve.csv"
+    
+    try:
+        with open(csv_path, 'w') as f:
+            f.write("Iteration,SolutionNorm,ResidualNorm\n")
+            for i, (sol_norm, res_norm) in enumerate(zip(solution_history, residual_history)):
+                f.write(f"{i+1},{sol_norm:.10e},{res_norm:.10e}\n")
+    except Exception as e:
+        print(f"[WARN] Failed to save L-curve: {e}")
+
+
 # ----- API Endpoints -----
 @app.route('/health', methods=['GET'])
 def health():
@@ -311,6 +329,10 @@ def solve():
                 result.iteration_images, job_id,
                 ds['image_rows'], ds['image_cols']
             )
+        
+        # Save L-curve data for proper L-curve visualization
+        if hasattr(result, 'residual_history') and hasattr(result, 'solution_history'):
+            save_lcurve_csv(job_id, result.residual_history, result.solution_history)
         
         # Save telemetry
         telemetry = {

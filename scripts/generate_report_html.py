@@ -127,6 +127,313 @@ def create_image_png(csv_path: Path, output_path: Path, dataset: str, error: flo
     return output_path
 
 
+def create_lcurve_plot(img_dir: Path, output_dir: Path, job_id: str, server: str, dataset: str) -> str:
+    """Create L-curve plot. Prefers CSV L-curve data, falls back to iteration calculation.
+    
+    Traditional L-curve: X = ||x|| (solution norm), Y = ||r|| (residual norm).
+    """
+    prefix = "cpp_" if server.lower() == 'cpp' else ""
+    
+    # First try to find L-curve CSV file
+    lcurve_csv = img_dir / f"{job_id}_lcurve.csv"
+    cpp_lcurve_csv = img_dir / f"cpp_{job_id}_lcurve.csv"
+    
+    solution_norms = []
+    residual_norms = []
+    
+    # Try to load from L-curve CSV (preferred - has real data)
+    target_csv = cpp_lcurve_csv if server.lower() == 'cpp' else lcurve_csv
+    if target_csv.exists():
+        try:
+            df = pd.read_csv(target_csv)
+            solution_norms = df['SolutionNorm'].tolist()
+            residual_norms = df['ResidualNorm'].tolist()
+        except Exception as e:
+            print(f"[WARN] Failed to read L-curve CSV: {e}")
+    
+    # Fallback: calculate from iteration images if no CSV
+    if not solution_norms:
+        pattern = f"{prefix}{job_id}_iter_*.csv"
+        iter_files = glob.glob(str(img_dir / pattern))
+        
+        if len(iter_files) < 2:
+            return ""
+        
+        def get_iter_num(f):
+            try:
+                return int(Path(f).stem.split('_iter_')[-1])
+            except:
+                return 0
+        iter_files = sorted(iter_files, key=get_iter_num)
+        
+        for i, iter_file in enumerate(iter_files):
+            try:
+                data = np.loadtxt(iter_file, delimiter=',')
+                sol_norm = np.linalg.norm(data.flatten())
+                if sol_norm > 0:
+                    solution_norms.append(sol_norm)
+                    # Use change in norm as residual proxy (fallback)
+                    if len(residual_norms) == 0:
+                        residual_norms.append(sol_norm)
+                    else:
+                        residual_norms.append(abs(sol_norm - solution_norms[-2]))
+            except:
+                continue
+    
+    if len(solution_norms) < 2 or len(residual_norms) < 2:
+        return ""
+    
+    # Create L-curve plot (traditional: solution norm vs residual norm, log-log)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    fig.patch.set_facecolor('#1a1a2e')
+    ax.set_facecolor('#1a1a2e')
+    
+    color = '#f97316' if server.lower() == 'cpp' else '#3b82f6'
+    
+    # Filter out zeros for log scale
+    valid_points = [(x, y) for x, y in zip(solution_norms, residual_norms) if x > 0 and y > 0]
+    if len(valid_points) < 2:
+        plt.close(fig)
+        return ""
+    
+    x_vals, y_vals = zip(*valid_points)
+    
+    # Plot with log-log scale
+    ax.loglog(x_vals, y_vals, 'o-', color=color, linewidth=2, markersize=8)
+    
+    # Mark elbow point (middle of curve as approximation)
+    if len(x_vals) >= 3:
+        elbow_idx = len(x_vals) // 2
+        ax.plot(x_vals[elbow_idx], y_vals[elbow_idx], 's', 
+               color='#22c55e', markersize=14, label=f'Cotovelo (iter {elbow_idx+1})', zorder=5)
+    
+    ax.set_xlabel('||x|| (Norma da Solução)', color='white', fontsize=12)
+    ax.set_ylabel('||r|| (Norma do Resíduo)', color='white', fontsize=12)
+    ax.set_title(f'Curva L - {dataset} ({server.upper()})', color='white', fontsize=14)
+    ax.tick_params(axis='both', which='both', colors='white', labelcolor='white')
+    ax.xaxis.label.set_color('white')
+    ax.yaxis.label.set_color('white')
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_color('white')
+    ax.spines['bottom'].set_color('white')
+    ax.spines['top'].set_color('white')
+    ax.spines['left'].set_color('white')
+    ax.spines['right'].set_color('white')
+    ax.legend(facecolor='#252542', edgecolor='white', labelcolor='white')
+    ax.grid(True, alpha=0.3, color='white')
+    
+    filename = f"lcurve_{dataset}_{server}.png"
+    fig.savefig(output_dir / filename, dpi=150, bbox_inches='tight', facecolor='#1a1a2e')
+    plt.close(fig)
+    return filename
+
+
+def create_resource_usage_charts(input_dir: Path, output_dir: Path) -> dict:
+    """Create CPU and Memory usage timeline charts. Returns dict with filenames."""
+    metrics_path = input_dir / 'telemetry' / 'system_metrics.csv'
+    if not metrics_path.exists():
+        return {}
+    
+    try:
+        df = pd.read_csv(metrics_path)
+    except:
+        return {}
+    
+    if df.empty:
+        return {}
+    
+    # Parse timestamps
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['elapsed_sec'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
+    
+    result = {}
+    
+    # CPU Usage Chart
+    fig, ax = plt.subplots(figsize=(10, 5))
+    fig.patch.set_facecolor('#1a1a2e')
+    ax.set_facecolor('#1a1a2e')
+    
+    ax.fill_between(df['elapsed_sec'], df['cpu_percent'], alpha=0.3, color='#7c3aed')
+    ax.plot(df['elapsed_sec'], df['cpu_percent'], color='#a78bfa', linewidth=2)
+    
+    ax.set_xlabel('Tempo (segundos)', color='white', fontsize=12)
+    ax.set_ylabel('Uso de CPU (%)', color='white', fontsize=12)
+    ax.set_title('Uso de CPU Durante Teste de Saturação', color='white', fontsize=14)
+    ax.tick_params(colors='white')
+    ax.spines['bottom'].set_color('white')
+    ax.spines['top'].set_color('white')
+    ax.spines['left'].set_color('white')
+    ax.spines['right'].set_color('white')
+    ax.set_ylim(0, 100)
+    ax.axhline(y=df['cpu_percent'].mean(), color='#ef4444', linestyle='--', label=f"Média: {df['cpu_percent'].mean():.1f}%")
+    ax.legend(facecolor='#252542', edgecolor='white', labelcolor='white')
+    
+    cpu_file = "cpu_usage.png"
+    fig.savefig(output_dir / cpu_file, dpi=150, bbox_inches='tight', facecolor='#1a1a2e')
+    plt.close(fig)
+    result['cpu'] = cpu_file
+    
+    # Memory Usage Chart
+    fig, ax = plt.subplots(figsize=(10, 5))
+    fig.patch.set_facecolor('#1a1a2e')
+    ax.set_facecolor('#1a1a2e')
+    
+    memory_gb = df['memory_mb'] / 1024
+    ax.fill_between(df['elapsed_sec'], memory_gb, alpha=0.3, color='#22c55e')
+    ax.plot(df['elapsed_sec'], memory_gb, color='#4ade80', linewidth=2)
+    
+    ax.set_xlabel('Tempo (segundos)', color='white', fontsize=12)
+    ax.set_ylabel('Memória Usada (GB)', color='white', fontsize=12)
+    ax.set_title('Uso de Memória Durante Teste de Saturação', color='white', fontsize=14)
+    ax.tick_params(colors='white')
+    ax.spines['bottom'].set_color('white')
+    ax.spines['top'].set_color('white')
+    ax.spines['left'].set_color('white')
+    ax.spines['right'].set_color('white')
+    ax.axhline(y=memory_gb.mean(), color='#ef4444', linestyle='--', label=f"Média: {memory_gb.mean():.1f} GB")
+    ax.legend(facecolor='#252542', edgecolor='white', labelcolor='white')
+    
+    mem_file = "memory_usage.png"
+    fig.savefig(output_dir / mem_file, dpi=150, bbox_inches='tight', facecolor='#1a1a2e')
+    plt.close(fig)
+    result['memory'] = mem_file
+    
+    return result
+
+
+def create_per_job_memory_chart(df: pd.DataFrame, output_dir: Path) -> str:
+    """Create bar chart showing memory usage per job by server."""
+    # Only use jobs that have RAM data (Python jobs typically have it)
+    df_with_ram = df[df['ram_peak_mb'] > 0].copy()
+    
+    if df_with_ram.empty:
+        return ""
+    
+    # Group by dataset and server, get average RAM
+    grouped = df_with_ram.groupby(['dataset_id', 'server']).agg({
+        'ram_peak_mb': 'mean'
+    }).reset_index()
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    fig.patch.set_facecolor('#1a1a2e')
+    ax.set_facecolor('#1a1a2e')
+    
+    datasets = sorted(grouped['dataset_id'].unique())
+    x = np.arange(len(datasets))
+    width = 0.35
+    
+    cpp_data = grouped[grouped['server'] == 'cpp'].set_index('dataset_id').reindex(datasets)
+    py_data = grouped[grouped['server'] == 'python'].set_index('dataset_id').reindex(datasets)
+    
+    if not cpp_data.empty and cpp_data['ram_peak_mb'].notna().any():
+        ax.bar(x - width/2, cpp_data['ram_peak_mb'].fillna(0), width, 
+              label='C++', color='#f97316')
+    
+    if not py_data.empty and py_data['ram_peak_mb'].notna().any():
+        ax.bar(x + width/2, py_data['ram_peak_mb'].fillna(0), width,
+              label='Python', color='#3b82f6')
+    
+    ax.set_xlabel('Dataset', color='white', fontsize=12)
+    ax.set_ylabel('Memória Pico (MB)', color='white', fontsize=12)
+    ax.set_title('Uso de Memória por Job (RAM Pico)', color='white', fontsize=14)
+    ax.set_xticks(x)
+    ax.set_xticklabels(datasets, rotation=45, ha='right', color='white')
+    ax.tick_params(colors='white')
+    ax.spines['bottom'].set_color('white')
+    ax.spines['top'].set_color('white')
+    ax.spines['left'].set_color('white')
+    ax.spines['right'].set_color('white')
+    ax.legend(facecolor='#252542', edgecolor='white', labelcolor='white')
+    ax.grid(axis='y', alpha=0.3, color='white')
+    
+    plt.tight_layout()
+    filename = "memory_per_job.png"
+    fig.savefig(output_dir / filename, dpi=150, bbox_inches='tight', facecolor='#1a1a2e')
+    plt.close(fig)
+    return filename
+
+
+def create_race_comparison_charts(df: pd.DataFrame, output_dir: Path) -> dict:
+    """Create race comparison bar charts for 30x30 and 60x60 datasets. Returns dict with filenames."""
+    result = {}
+    
+    for size_label, size_pattern in [('30x30', '30x30'), ('60x60', '60x60')]:
+        # Filter by size
+        size_df = df[df['dataset_id'].str.contains(size_pattern, case=False)]
+        if size_df.empty:
+            continue
+        
+        # Group by server and dataset
+        grouped = size_df.groupby(['dataset_id', 'server']).agg({
+            'solver_time_ms': ['mean', 'std'],
+            'iterations': ['mean', 'std']
+        }).reset_index()
+        grouped.columns = ['dataset', 'server', 'time_mean', 'time_std', 'iter_mean', 'iter_std']
+        grouped['time_std'] = grouped['time_std'].fillna(0)
+        grouped['iter_std'] = grouped['iter_std'].fillna(0)
+        
+        # Get unique datasets
+        datasets = sorted(grouped['dataset'].unique())
+        if len(datasets) == 0:
+            continue
+        
+        # Create comparison chart
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        fig.patch.set_facecolor('#1a1a2e')
+        
+        x = np.arange(len(datasets))
+        width = 0.35
+        
+        for ax in [ax1, ax2]:
+            ax.set_facecolor('#1a1a2e')
+            ax.tick_params(colors='white')
+            ax.spines['bottom'].set_color('white')
+            ax.spines['top'].set_color('white')
+            ax.spines['left'].set_color('white')
+            ax.spines['right'].set_color('white')
+        
+        # Solver Time chart
+        cpp_times = grouped[grouped['server'] == 'cpp'].set_index('dataset').reindex(datasets)
+        py_times = grouped[grouped['server'] == 'python'].set_index('dataset').reindex(datasets)
+        
+        if not cpp_times.empty:
+            ax1.bar(x - width/2, cpp_times['time_mean'].fillna(0), width, 
+                   yerr=cpp_times['time_std'].fillna(0), label='C++', color='#f97316', capsize=5)
+        if not py_times.empty:
+            ax1.bar(x + width/2, py_times['time_mean'].fillna(0), width,
+                   yerr=py_times['time_std'].fillna(0), label='Python', color='#3b82f6', capsize=5)
+        
+        ax1.set_xlabel('Dataset', color='white', fontsize=12)
+        ax1.set_ylabel('Tempo (ms)', color='white', fontsize=12)
+        ax1.set_title(f'Tempo de Solver - {size_label}', color='white', fontsize=14)
+        ax1.set_xticks(x)
+        ax1.set_xticklabels([d.split('_')[-1] for d in datasets], color='white')
+        ax1.legend(facecolor='#252542', edgecolor='white', labelcolor='white')
+        
+        # Iterations chart
+        if not cpp_times.empty:
+            ax2.bar(x - width/2, cpp_times['iter_mean'].fillna(0), width,
+                   yerr=cpp_times['iter_std'].fillna(0), label='C++', color='#f97316', capsize=5)
+        if not py_times.empty:
+            ax2.bar(x + width/2, py_times['iter_mean'].fillna(0), width,
+                   yerr=py_times['iter_std'].fillna(0), label='Python', color='#3b82f6', capsize=5)
+        
+        ax2.set_xlabel('Dataset', color='white', fontsize=12)
+        ax2.set_ylabel('Iterações', color='white', fontsize=12)
+        ax2.set_title(f'Iterações até Convergência - {size_label}', color='white', fontsize=14)
+        ax2.set_xticks(x)
+        ax2.set_xticklabels([d.split('_')[-1] for d in datasets], color='white')
+        ax2.legend(facecolor='#252542', edgecolor='white', labelcolor='white')
+        
+        plt.tight_layout()
+        filename = f"race_comparison_{size_label}.png"
+        fig.savefig(output_dir / filename, dpi=150, bbox_inches='tight', facecolor='#1a1a2e')
+        plt.close(fig)
+        result[size_label] = filename
+    
+    return result
+
+
 def generate_html_report(input_dir: Path, output_dir: Path):
     """Generate beautiful HTML report with CSS styling."""
     
@@ -216,6 +523,35 @@ def generate_html_report(input_dir: Path, output_dir: Path):
             'is_good': error < epsilon
         })
     
+    # Generate L-curve plots for each unique (dataset, server)
+    print("[INFO] Generating L-curve plots...")
+    lcurve_data = []
+    for img in images:
+        meta = img['meta']
+        job_id = meta.get('job_id', '')
+        dataset = meta.get('dataset_id', 'unknown')
+        server = meta.get('server', 'unknown').lower()
+        
+        lcurve_file = create_lcurve_plot(img_dir, assets_dir, job_id, server, dataset)
+        if lcurve_file:
+            lcurve_data.append({
+                'file': lcurve_file,
+                'dataset': dataset,
+                'server': server.upper()
+            })
+    
+    # Generate resource usage charts
+    print("[INFO] Generating resource usage charts...")
+    resource_charts = create_resource_usage_charts(input_dir, assets_dir)
+    
+    # Generate race comparison charts
+    print("[INFO] Generating race comparison charts...")
+    race_charts = create_race_comparison_charts(df, assets_dir)
+    
+    # Generate per-job memory chart
+    print("[INFO] Generating per-job memory chart...")
+    per_job_memory = create_per_job_memory_chart(df, assets_dir)
+    
     # Calculate speedup
     cpp_times = df[df['server'] == 'cpp']['solver_time_ms']
     py_times = df[df['server'] == 'python']['solver_time_ms']
@@ -248,7 +584,11 @@ def generate_html_report(input_dir: Path, output_dir: Path):
         servers=', '.join(df['server'].unique()),
         perf_rows=perf_rows,
         images=image_data,
-        speedup=speedup
+        speedup=speedup,
+        lcurve_data=lcurve_data,
+        resource_charts=resource_charts,
+        race_charts=race_charts,
+        per_job_memory=per_job_memory
     )
     
     html_path = output_dir / 'Relatorio_Cientifico.html'
@@ -273,6 +613,61 @@ def generate_html_template(**data):
                 <td class="mono">{row['error']}</td>
                 <td>{row['iterations']}</td>
             </tr>"""
+    
+    # Build L-curve section
+    lcurve_section = ""
+    if data.get('lcurve_data'):
+        lcurve_cards = ""
+        for lc in data['lcurve_data']:
+            lcurve_cards += f'''
+            <div class="chart-card">
+                <h4>{lc['dataset']} - <span class="badge {'badge-cpp' if lc['server']=='CPP' else 'badge-py'}">{lc['server']}</span></h4>
+                <img src="report_assets/{lc['file']}" alt="L-curve {lc['dataset']}" class="chart-img">
+            </div>'''
+        lcurve_section = f'''
+        <section>
+            <h2>📈 Curvas L (Análise de Regularização)</h2>
+            <p>O "cotovelo" da curva L indica o ponto ótimo de regularização - balanço entre erro e norma da solução.</p>
+            <div class="chart-grid">
+                {lcurve_cards}
+            </div>
+        </section>'''
+    
+    # Build resource usage section
+    resource_section = ""
+    if data.get('resource_charts') or data.get('per_job_memory'):
+        rc = data.get('resource_charts', {})
+        cpu_html = f'<img src="report_assets/{rc["cpu"]}" alt="CPU Usage" class="chart-wide">' if 'cpu' in rc else ''
+        mem_html = f'<img src="report_assets/{rc["memory"]}" alt="Memory Usage" class="chart-wide">' if 'memory' in rc else ''
+        job_mem_html = f'<img src="report_assets/{data["per_job_memory"]}" alt="Per-Job Memory" class="chart-wide">' if data.get('per_job_memory') else ''
+        
+        resource_section = f'''
+        <section>
+            <h2>⚡ Uso de Recursos</h2>
+            <p>Monitoramento de recursos durante a execução.</p>
+            <div class="resource-charts">
+                {job_mem_html}
+                {cpu_html}
+                {mem_html}
+            </div>
+        </section>'''
+    
+    # Build race comparison section
+    race_section = ""
+    if data.get('race_charts'):
+        race_cards = ""
+        for size, filename in data['race_charts'].items():
+            race_cards += f'''
+            <div class="race-chart">
+                <h4>Comparação {size}</h4>
+                <img src="report_assets/{filename}" alt="Race {size}" class="chart-wide">
+            </div>'''
+        race_section = f'''
+        <section>
+            <h2>🏁 Comparativo Race (C++ vs Python)</h2>
+            <p>Barras de erro indicam desvio padrão calculado a partir de múltiplas execuções.</p>
+            {race_cards}
+        </section>'''
     
     # Build image cards
     image_cards = ""
@@ -623,6 +1018,57 @@ def generate_html_template(**data):
             font-size: 0.85rem;
             font-weight: 500;
         }}
+        
+        /* Chart sections */
+        .chart-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }}
+        
+        .chart-card {{
+            background: var(--bg-hover);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            text-align: center;
+        }}
+        
+        .chart-card h4 {{
+            color: var(--text);
+            margin-bottom: 0.5rem;
+        }}
+        
+        .chart-img {{
+            width: 100%;
+            max-width: 500px;
+            border-radius: 0.5rem;
+        }}
+        
+        .chart-wide {{
+            width: 100%;
+            max-width: 900px;
+            border-radius: 0.5rem;
+            margin: 1rem auto;
+            display: block;
+        }}
+        
+        .resource-charts {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+        }}
+        
+        .race-chart {{
+            margin: 1.5rem 0;
+            text-align: center;
+        }}
+        
+        .race-chart h4 {{
+            color: var(--accent-light);
+            margin-bottom: 0.5rem;
+        }}
     </style>
 </head>
 <body>
@@ -681,6 +1127,12 @@ def generate_html_template(**data):
                 {image_cards}
             </div>
         </section>
+        
+        {lcurve_section}
+        
+        {race_section}
+        
+        {resource_section}
         
         <footer>
             Relatório gerado automaticamente em {datetime.now().isoformat()}
