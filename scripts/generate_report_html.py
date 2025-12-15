@@ -552,10 +552,16 @@ def generate_html_report(input_dir: Path, output_dir: Path):
     print("[INFO] Generating per-job memory chart...")
     per_job_memory = create_per_job_memory_chart(df, assets_dir)
     
-    # Calculate speedup
+    # Calculate speedup and throughput
     cpp_times = df[df['server'] == 'cpp']['solver_time_ms']
     py_times = df[df['server'] == 'python']['solver_time_ms']
     speedup = py_times.mean() / cpp_times.mean() if len(cpp_times) > 0 and len(py_times) > 0 else 1.0
+    
+    # Calculate throughput (images per second)
+    cpp_throughput = 1000.0 / cpp_times.mean() if len(cpp_times) > 0 and cpp_times.mean() > 0 else 0
+    py_throughput = 1000.0 / py_times.mean() if len(py_times) > 0 and py_times.mean() > 0 else 0
+    cpp_total_images = len(cpp_times)
+    py_total_images = len(py_times)
     
     # Generate performance table rows
     perf_rows = []
@@ -585,6 +591,10 @@ def generate_html_report(input_dir: Path, output_dir: Path):
         perf_rows=perf_rows,
         images=image_data,
         speedup=speedup,
+        cpp_throughput=cpp_throughput,
+        py_throughput=py_throughput,
+        cpp_total_images=cpp_total_images,
+        py_total_images=py_total_images,
         lcurve_data=lcurve_data,
         resource_charts=resource_charts,
         race_charts=race_charts,
@@ -615,8 +625,12 @@ def generate_html_template(**data):
             </tr>"""
     
     # Build L-curve section
+    # ========================================
+    # SET TO True TO SHOW L-CURVE ANALYSIS SECTION
+    SHOW_LCURVE_SECTION = False  # Toggle: True = show, False = hide
+    # ========================================
     lcurve_section = ""
-    if data.get('lcurve_data'):
+    if SHOW_LCURVE_SECTION and data.get('lcurve_data'):
         lcurve_cards = ""
         for lc in data['lcurve_data']:
             lcurve_cards += f'''
@@ -914,11 +928,28 @@ def generate_html_template(**data):
         .status-bad {{ color: var(--error); }}
         
         .speedup {{
-            font-size: 3rem;
+            font-size: 2rem;
             font-weight: 700;
             color: var(--accent-light);
             text-align: center;
-            padding: 2rem;
+            padding: 1rem;
+        }}
+        
+        .metrics-row {{
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+        }}
+        
+        .throughput {{
+            font-size: 1.1rem;
+            color: var(--text);
+            background: var(--bg-hover);
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
         }}
         
         .tech-grid {{
@@ -1098,7 +1129,14 @@ def generate_html_template(**data):
         
         <section>
             <h2>📊 Comparativo de Desempenho</h2>
-            <div class="speedup">Speedup C++ vs Python: {data['speedup']:.2f}x</div>
+            <div class="metrics-row">
+                <div class="speedup">Speedup C++ vs Python: {data['speedup']:.2f}x</div>
+                <div class="throughput">
+                    <span class="badge badge-cpp">C++</span> {data['cpp_throughput']:.2f} img/s ({data['cpp_total_images']} imagens)
+                    &nbsp;|&nbsp;
+                    <span class="badge badge-py">Python</span> {data['py_throughput']:.2f} img/s ({data['py_total_images']} imagens)
+                </div>
+            </div>
             <table>
                 <thead>
                     <tr>

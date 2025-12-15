@@ -225,6 +225,80 @@ class BenchmarkOrchestrator:
         stop_monitor.set()
         monitor.join()
 
+    def run_full_mode(self, num_reps=10, concurrency=4):
+        """
+        Full benchmark mode with:
+        - All datasets (30x30 and 60x60)
+        - Random gains (0.5 to 2.0) with same seed for C++ and Python
+        - Multiple repetitions for statistical significance
+        - Stress test with high concurrency
+        """
+        print("\n" + "="*60)
+        print("🔬 STARTING FULL BENCHMARK MODE")
+        print(f"   Repetitions: {num_reps} per dataset")
+        print(f"   Concurrency: {concurrency} clients")
+        print(f"   Gain: Random (0.5 - 2.0)")
+        print("="*60)
+        
+        all_30x30 = ["30x30_g1", "30x30_g2", "30x30_A1"]
+        all_60x60 = ["60x60_G1", "60x60_G2", "60x60_A1"]
+        all_datasets = all_30x30 + all_60x60
+
+        # --- WARMUP ---
+        print("\n>>> PHASE 1: WARMUP")
+        self.run_full_job("warmup", 1, ["30x30_g1"], concurrency=1)
+
+        # --- 30x30 TESTS ---
+        print(f"\n>>> PHASE 2: 30x30 DATASETS ({num_reps} reps each, random gains)")
+        self.run_full_job("full_30", num_reps, all_30x30, concurrency=1)
+
+        # --- 60x60 TESTS ---
+        print(f"\n>>> PHASE 3: 60x60 DATASETS ({num_reps} reps each, random gains)")
+        self.run_full_job("full_60", num_reps, all_60x60, concurrency=1)
+
+        # --- STRESS TEST ---
+        print(f"\n>>> PHASE 4: STRESS TEST ({concurrency} concurrent clients)")
+        stop_monitor = threading.Event()
+        monitor = SystemMonitor(self.output_dir / "telemetry" / "system_metrics.csv", stop_monitor)
+        monitor.start()
+        
+        self.run_full_job("stress", num_reps, all_datasets, concurrency=concurrency)
+        
+        stop_monitor.set()
+        monitor.join()
+
+    def run_full_job(self, job_prefix, num_jobs, datasets, concurrency=1, target_server=None):
+        """Run jobs with random gains (0.5-2.0) using same seed for both servers."""
+        client_script = self.project_root / "scripts" / "client_generator.py"
+        procs = []
+        
+        targets = []
+        if target_server == 'python' or target_server is None: targets.append(('python', self.python_port))
+        if target_server == 'cpp' or target_server is None: targets.append(('cpp', self.cpp_port))
+        
+        for srv_name, port in targets:
+            for i in range(concurrency):
+                cmd = [
+                    sys.executable, str(client_script),
+                    "--seed", str(42 + i),  # Same seed for both servers
+                    "--num-jobs", str(num_jobs),
+                    "--output-dir", str(self.output_dir),
+                    "--gain-min", "0.5",
+                    "--gain-max", "2.0",  # Random gains
+                ]
+                
+                cmd.extend(["--datasets"] + datasets)
+                
+                if srv_name == 'python': 
+                    cmd.extend(["--python-only", "--python-url", f"http://localhost:{port}"])
+                else: 
+                    cmd.extend(["--cpp-only", "--cpp-url", f"http://localhost:{port}"])
+                
+                p = subprocess.Popen(cmd)
+                procs.append(p)
+        
+        for p in procs: p.wait()
+
 
     def generate_report(self):
         print("\n[INFO] Generating Scientific Report (HTML)...")
@@ -237,9 +311,20 @@ class BenchmarkOrchestrator:
         subprocess.run([sys.executable, str(report_script), "--input-dir", str(self.output_dir)])
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--demo', action='store_true', help="Run deterministic scientific demo")
+    parser = argparse.ArgumentParser(description="Ultrasound Reconstruction Benchmark")
+    parser.add_argument('--demo', action='store_true', help="Run deterministic scientific demo (fixed gain=1.0)")
+    parser.add_argument('--full', action='store_true', help="Run FULL benchmark: all datasets, random gains, multiple reps")
+    parser.add_argument('--reps', type=int, default=10, help="Number of repetitions per dataset (default: 10)")
+    parser.add_argument('--concurrency', type=int, default=4, help="Max concurrent clients for stress test (default: 4)")
     args = parser.parse_args()
+    
+    # Determine mode name
+    if args.full:
+        mode_name = f"FULL_r{args.reps}_c{args.concurrency}"
+    elif args.demo:
+        mode_name = "DEMO"
+    else:
+        mode_name = "MANUAL"
     
     orch = BenchmarkOrchestrator(Path(__file__).parent.absolute())
     
@@ -249,17 +334,19 @@ def main():
     signal.signal(signal.SIGINT, cleanup)
     
     try:
-        orch.setup_experiment("DEMO" if args.demo else "MANUAL")
+        orch.setup_experiment(mode_name)
         orch.start_servers()
         
-        if args.demo:
+        if args.full:
+            orch.run_full_mode(num_reps=args.reps, concurrency=args.concurrency)
+        elif args.demo:
             orch.run_demo_mode()
         else:
             # Default manual run (backward compatibility)
             orch.run_client_job("manual", 5, ["30x30_g1", "60x60_G1"], concurrency=3)
             
         orch.generate_report()
-        print(f"\n[SUCCESS] Experiment Complete. Report at: {orch.output_dir}/report.md")
+        print(f"\n[SUCCESS] Experiment Complete. Report at: {orch.output_dir}/Relatorio_Cientifico.html")
         
     finally:
         orch.stop_servers()

@@ -2,6 +2,9 @@
  * C++ Ultrasound Reconstruction HTTP Server (Optimized with Caching)
  */
 
+// Note: Windows headers removed due to SDK compatibility issues with PSAPI
+// C++ RAM metrics disabled - Python server reports RAM correctly for benchmark
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -155,6 +158,11 @@ std::string get_iso_timestamp() {
   return ss.str();
 }
 
+// Get current process memory usage in MB
+// Note: PSAPI removed due to Windows SDK compatibility - returns 0
+// Python server reports RAM metrics correctly for the benchmark
+double get_current_memory_mb() { return 0.0; }
+
 void save_job_metrics(const json &metrics) {
   // Use a mutex for file writing to avoid race conditions
   static std::mutex file_mtx;
@@ -181,8 +189,9 @@ void save_job_metrics(const json &metrics) {
        << metrics["final_epsilon"].get<double>() << ","
        << (metrics["converged"].get<bool>() ? "true" : "false") << ","
        << std::fixed << metrics["latency_ms"].get<double>() << "," << std::fixed
-       << metrics["solver_time_ms"].get<double>() << ","
-       << "0,0\n";
+       << metrics["solver_time_ms"].get<double>() << "," << std::fixed
+       << metrics.value("ram_peak_mb", 0.0) << "," << std::fixed
+       << metrics.value("cpu_avg_pct", 0.0) << "\n";
 }
 
 void save_image_csv(const Eigen::VectorXd &image, const fs::path &path,
@@ -298,6 +307,7 @@ void handle_solve(const httplib::Request &req, httplib::Response &res) {
     auto t1 = std::chrono::high_resolution_clock::now();
     double solver_ms =
         std::chrono::duration<double, std::milli>(t1 - t0).count();
+    double ram_peak_mb = get_current_memory_mb();
 
     std::string timestamp_end = get_iso_timestamp();
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -326,6 +336,8 @@ void handle_solve(const httplib::Request &req, httplib::Response &res) {
         {"solver_time_ms", result.execution_time_ms},
         {"latency_ms", latency_ms},
         {"server", "cpp"},
+        {"ram_peak_mb", ram_peak_mb},
+        {"cpu_avg_pct", 0.0},
         {"image_csv_path", "images/cpp_" + job_id + "_image.csv"},
         {"metadata_json_path", "images/cpp_" + job_id + "_meta.json"}};
 
