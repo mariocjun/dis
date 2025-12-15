@@ -18,7 +18,7 @@ set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS TRUE CACHE BOOL "Suprimir avisos de desenv
 
 # ---- Project ----
 
-project(UltrasoundServer LANGUAGES CXX)
+project(UltrasoundServerHTTP LANGUAGES CXX)
 
 # ---- Fetch CPM ----
 # (Esta parte baixa o gerenciador de pacotes CPM, mantemos como está)
