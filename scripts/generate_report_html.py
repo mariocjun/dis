@@ -37,11 +37,20 @@ def format_error(value: float) -> str:
     return f"{value:.4f}"
 
 
-def create_iteration_frames(img_dir: Path, output_dir: Path, dataset_id: str, server: str) -> list:
+def create_iteration_frames(img_dir: Path, output_dir: Path, job_id: str, server: str) -> list:
     """Create individual PNG frames from iteration images for carousel."""
-    # Look for iteration files pattern: *_iter_*.csv
-    pattern = f"*{dataset_id}*{server}*_iter_*.csv"
-    iter_files = sorted(glob.glob(str(img_dir / pattern)))
+    # Look for iteration files: cpp_jobid_iter_N.csv or jobid_iter_N.csv
+    prefix = "cpp_" if server.lower() == 'cpp' else ""
+    pattern = f"{prefix}{job_id}_iter_*.csv"
+    iter_files = glob.glob(str(img_dir / pattern))
+    
+    # Sort numerically by iteration number
+    def get_iter_num(f):
+        try:
+            return int(Path(f).stem.split('_iter_')[-1])
+        except:
+            return 0
+    iter_files = sorted(iter_files, key=get_iter_num)
     
     if len(iter_files) < 2:
         return []
@@ -52,31 +61,32 @@ def create_iteration_frames(img_dir: Path, output_dir: Path, dataset_id: str, se
         try:
             data = np.loadtxt(iter_file, delimiter=',')
             
-            fig, ax = plt.subplots(figsize=(6, 6))
+            # Same settings as main image
+            fig, ax = plt.subplots(figsize=(8, 8))
             fig.patch.set_facecolor('#1a1a2e')
             ax.set_facecolor('#1a1a2e')
             
             # Same transform as main image
             data_rotated = np.flipud(np.rot90(data, k=1))
             
-            v_min, v_max = np.min(data), np.max(data)
+            v_min, v_max = np.min(data_rotated), np.max(data_rotated)
             if v_max <= v_min:
                 v_max = v_min + 1.0
             
-            im = ax.imshow(data_rotated, cmap='inferno', vmin=v_min, vmax=v_max)
+            im = ax.imshow(data_rotated, cmap='inferno', vmin=v_min, vmax=v_max,
+                           aspect='equal', interpolation='nearest')
             
-            # White colorbar
-            cbar = fig.colorbar(im, ax=ax)
+            # Colorbar with white text (same as main)
+            cbar = fig.colorbar(im, ax=ax, label='Intensidade')
             cbar.ax.yaxis.set_tick_params(color='white')
+            cbar.ax.yaxis.label.set_color('white')
             plt.setp(cbar.ax.yaxis.get_ticklabels(), color='white')
             
-            iter_num = Path(iter_file).stem.split('_')[-1]
-            ax.set_title(f"Iteração {iter_num}", fontsize=14, fontweight='bold', color='white')
             ax.axis('off')
             
-            frame_name = f"iter_{dataset_id}_{server}_{i:02d}.png"
+            frame_name = f"iter_{job_id}_{server}_{i:02d}.png"
             frame_path = output_dir / frame_name
-            fig.savefig(frame_path, dpi=100, bbox_inches='tight', facecolor='#1a1a2e')
+            fig.savefig(frame_path, dpi=150, bbox_inches='tight', facecolor='#1a1a2e')
             plt.close(fig)
             
             frame_paths.append(frame_name)
@@ -189,8 +199,9 @@ def generate_html_report(input_dir: Path, output_dir: Path):
         
         create_image_png(img['csv'], png_path, dataset, error, epsilon)
         
-        # Create iteration frames for carousel
-        iter_frames = create_iteration_frames(img_dir, assets_dir, dataset, server)
+        # Create iteration frames for carousel using job_id
+        job_id = meta.get('job_id', '')
+        iter_frames = create_iteration_frames(img_dir, assets_dir, job_id, server)
         
         image_data.append({
             'png': png_name,
@@ -225,9 +236,10 @@ def generate_html_report(input_dir: Path, output_dir: Path):
         })
     
     # Generate HTML
+    current_date = datetime.now().strftime('%d/%m/%Y %H:%M')
     html = generate_html_template(
-        title="Relatório Científico: Reconstrução Ultrassônica",
-        date=datetime.now().strftime('%d/%m/%Y %H:%M'),
+        title=f"Relatório execução: {current_date} | {input_dir.name}",
+        date=current_date,
         dir_name=input_dir.name,
         env=env,
         epsilon=epsilon,
@@ -272,12 +284,13 @@ def generate_html_template(**data):
         # Build carousel if frames exist
         carousel_html = ""
         if img['frames'] and len(img['frames']) > 0:
-            frames_json = json.dumps(img['frames'])
+            num_frames = len(img['frames'])
             carousel_html = f'''
                 <div class="carousel-controls">
-                    <button class="carousel-btn" onclick="prevFrame({i})">◀</button>
+                    <input type="range" class="carousel-slider" id="slider-{i}" 
+                           min="0" max="{num_frames}" value="{num_frames}" 
+                           oninput="slideFrame({i}, this.value)">
                     <span class="carousel-info" id="carousel-info-{i}">Final</span>
-                    <button class="carousel-btn" onclick="nextFrame({i})">▶</button>
                 </div>'''
         
         image_cards += f'''
@@ -457,10 +470,14 @@ def generate_html_template(**data):
         .image-container {{
             position: relative;
             background: #000;
+            aspect-ratio: 1 / 1;
+            overflow: hidden;
         }}
         
         .main-image {{
             width: 100%;
+            height: 100%;
+            object-fit: contain;
             display: block;
         }}
         
@@ -552,42 +569,59 @@ def generate_html_template(**data):
         .dot-good {{ background: var(--success); }}
         .dot-bad {{ background: var(--error); }}
         
-        /* Carousel styles */
+        /* Carousel slider styles */
         .carousel-controls {{
             position: absolute;
             bottom: 0.5rem;
             left: 50%;
             transform: translateX(-50%);
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 0.5rem;
-            background: rgba(0,0,0,0.7);
+            gap: 0.3rem;
+            background: rgba(0,0,0,0.75);
             padding: 0.5rem 1rem;
-            border-radius: 2rem;
+            border-radius: 1rem;
+            min-width: 200px;
         }}
         
-        .carousel-btn {{
+        .carousel-slider {{
+            width: 100%;
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+        }}
+        
+        .carousel-slider::-webkit-slider-thumb {{
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
             background: var(--accent);
-            color: white;
-            border: none;
-            width: 32px;
-            height: 32px;
             border-radius: 50%;
             cursor: pointer;
-            font-size: 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.3s;
+            transition: transform 0.2s;
         }}
         
-        .carousel-btn:hover {{ background: var(--accent-light); }}
+        .carousel-slider::-webkit-slider-thumb:hover {{
+            transform: scale(1.2);
+        }}
+        
+        .carousel-slider::-moz-range-thumb {{
+            width: 18px;
+            height: 18px;
+            background: var(--accent);
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+        }}
         
         .carousel-info {{
             color: white;
             font-size: 0.85rem;
-            min-width: 60px;
-            text-align: center;
+            font-weight: 500;
         }}
     </style>
 </head>
@@ -595,7 +629,6 @@ def generate_html_template(**data):
     <div class="container">
         <header>
             <h1>🔬 {data['title']}</h1>
-            <p class="subtitle">{data['date']} | {data['dir_name']}</p>
             
             <div class="meta-grid">
                 <div class="meta-item">
@@ -625,9 +658,9 @@ def generate_html_template(**data):
                     <tr>
                         <th>Dataset</th>
                         <th>Servidor</th>
-                        <th>Tempo Médio (ms)</th>
-                        <th>Erro Médio</th>
-                        <th>Iterações</th>
+                        <th title="Tempo médio de execução do solver em milissegundos. Menor = melhor desempenho.">Tempo Médio (ms) ⓘ</th>
+                        <th title="Erro residual final ||Hx - g||. Menor = solução mais precisa. Calculado como norma do resíduo.">Erro Médio ⓘ</th>
+                        <th title="Número de iterações até convergência. Menos iterações com baixo erro = melhor eficiência.">Iterações ⓘ</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -636,27 +669,6 @@ def generate_html_template(**data):
             </table>
         </section>
         
-        <section>
-            <h2>⚙️ Análise Técnica</h2>
-            <div class="tech-grid">
-                <div class="tech-card">
-                    <h4>🐍 Python (GIL)</h4>
-                    <p>O Global Interpreter Lock impede paralelismo real. Threads Python compartilham um único lock.</p>
-                </div>
-                <div class="tech-card">
-                    <h4>⚡ C++ (OpenMP)</h4>
-                    <p>Paralelismo nativo via #pragma. Operações H·p distribuídas entre threads reais.</p>
-                </div>
-                <div class="tech-card">
-                    <h4>📈 Eigen</h4>
-                    <p>Biblioteca C++ com vetorização SIMD automática para operações matriciais.</p>
-                </div>
-                <div class="tech-card">
-                    <h4>💾 Cache Binário</h4>
-                    <p>C++ usa arquivos .bin pré-processados. Zero parsing CSV em runtime.</p>
-                </div>
-            </div>
-        </section>
         
         <section>
             <h2>🖼️ Galeria de Imagens Reconstruídas</h2>
@@ -687,49 +699,23 @@ def generate_html_template(**data):
             return {{ frames, mainImg, card }};
         }}
         
-        function updateCarouselDisplay(cardIndex) {{
+        function slideFrame(cardIndex, value) {{
             const data = getCardData(cardIndex);
-            if (!data || data.frames.length === 0) return;
+            if (!data) return;
             
-            const idx = carouselState[cardIndex] || -1;
             const img = document.getElementById('img-' + cardIndex);
             const info = document.getElementById('carousel-info-' + cardIndex);
+            const idx = parseInt(value);
             
-            if (idx === -1) {{
+            if (idx >= data.frames.length) {{
                 // Show final image
                 img.src = 'report_assets/' + data.mainImg;
                 info.textContent = 'Final';
             }} else {{
                 // Show iteration frame
                 img.src = 'report_assets/' + data.frames[idx];
-                info.textContent = 'Iter ' + (idx + 1) + '/' + data.frames.length;
+                info.textContent = 'Iteração ' + (idx + 1) + '/' + data.frames.length;
             }}
-        }}
-        
-        function nextFrame(cardIndex) {{
-            const data = getCardData(cardIndex);
-            if (!data || data.frames.length === 0) return;
-            
-            if (carouselState[cardIndex] === undefined) carouselState[cardIndex] = -1;
-            
-            carouselState[cardIndex]++;
-            if (carouselState[cardIndex] >= data.frames.length) {{
-                carouselState[cardIndex] = -1; // Back to final
-            }}
-            updateCarouselDisplay(cardIndex);
-        }}
-        
-        function prevFrame(cardIndex) {{
-            const data = getCardData(cardIndex);
-            if (!data || data.frames.length === 0) return;
-            
-            if (carouselState[cardIndex] === undefined) carouselState[cardIndex] = -1;
-            
-            carouselState[cardIndex]--;
-            if (carouselState[cardIndex] < -1) {{
-                carouselState[cardIndex] = data.frames.length - 1; // Wrap to last iteration
-            }}
-            updateCarouselDisplay(cardIndex);
         }}
     </script>
 </body>
