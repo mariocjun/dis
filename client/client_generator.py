@@ -63,7 +63,7 @@ class ClientGenerator:
             python_url: str = "http://localhost:5001",
             cpp_url: str = "http://localhost:5002",
             seed: int = 42,
-            output_dir: str = "output_runs/benchmark"
+            output_dir: str = "execs/benchmark"
     ):
         self.python_url = python_url
         self.cpp_url = cpp_url
@@ -311,7 +311,7 @@ def main():
     parser.add_argument('--num-jobs', type=int, default=10, help='Number of jobs to send')
     parser.add_argument('--python-url', default='http://localhost:5001', help='Python server URL')
     parser.add_argument('--cpp-url', default='http://localhost:5002', help='C++ server URL')
-    parser.add_argument('--output-dir', default='output_runs/benchmark', help='Output directory')
+    parser.add_argument('--output-dir', default='execs/benchmark', help='Output directory')
     parser.add_argument('--python-only', action='store_true', help='Only test Python server')
     parser.add_argument('--cpp-only', action='store_true', help='Only test C++ server')
     parser.add_argument('--datasets', nargs='+', default=['30x30_g1', '30x30_g2', '60x60_G1'],

@@ -44,7 +44,7 @@ class ServerState:
         self.start_time = time.time()
         self.config: Dict[str, Any] = {}
         self.datasets: Dict[str, Dict] = {}
-        self.output_dir: Path = Path("output_runs/server_output")
+        self.output_dir: Path = Path("execs/server_output")
         
     def load_config(self, config_path: str):
         """Load server configuration from YAML"""
@@ -59,7 +59,7 @@ class ServerState:
         settings = self.config.get('settings', {})
         self.epsilon_tolerance = settings.get('epsilon_tolerance', 1e-4)
         self.max_iterations = settings.get('max_iterations', 10)
-        self.output_dir = Path(settings.get('output_base_dir', 'output_runs/server_output'))
+        self.output_dir = Path(settings.get('output_base_dir', 'execs/server_output'))
         
         # Ensure output directories exist
         (self.output_dir / 'images').mkdir(parents=True, exist_ok=True)

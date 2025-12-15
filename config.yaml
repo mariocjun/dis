@@ -2,7 +2,7 @@
 
 # Configurações Globais do Benchmark
 settings:
-  output_base_dir: "output_runs/manual_execution" # Diretório base relativo ao diretório de build
+  output_base_dir: "execs/manual_execution" # Diretório base relativo ao diretório de build
   epsilon_tolerance: 1.0e-4
   max_iterations: 10
   l_curve_iterations: 10 # Numero de iteracoes para calcular a curva L e encontrar o ponto otimo

@@ -74,7 +74,7 @@ struct ServerState {
       max_iterations = settings["max_iterations"].as<int>(10);
       num_threads = settings["num_omp_threads"].as<int>(4);
       std::string out_dir =
-          settings["output_base_dir"].as<std::string>("output_runs/cpp_server");
+          settings["output_base_dir"].as<std::string>("execs/cpp_server");
       output_dir = fs::path(out_dir);
     }
 
