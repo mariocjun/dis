@@ -288,12 +288,13 @@ void handle_solve(const httplib::Request &req, httplib::Response &res) {
 
     normalize_system_rows(H_copy, g_signal);
 
-    // Solver
+    // Solver - Enable intermediate image saving for carousel
     auto t0 = std::chrono::high_resolution_clock::now();
     ReconstructionResult result = run_cgnr_solver_epsilon_save_iters(
-        g_signal, H_copy, epsilon_tolerance, max_iterations, "",
-        (g_state.output_dir / "images").string(), ds.image_rows, ds.image_cols,
-        false);
+        g_signal, H_copy, epsilon_tolerance, max_iterations,
+        "cpp_" + job_id, // Prefix for iteration files
+        g_state.output_dir.string(), ds.image_rows, ds.image_cols,
+        true); // Save intermediate images for carousel
     auto t1 = std::chrono::high_resolution_clock::now();
     double solver_ms =
         std::chrono::duration<double, std::milli>(t1 - t0).count();

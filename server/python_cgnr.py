@@ -23,6 +23,7 @@ class CGNRResult:
     execution_time_ms: float    # Solver time in milliseconds
     residual_history: List[float]   # History of ||r_i||
     solution_history: List[float]   # History of ||x_i||
+    iteration_images: List[np.ndarray]  # List of x at each iteration for carousel
 
 
 def cgnr_solve(
@@ -75,10 +76,12 @@ def cgnr_solve(
     # Tracking
     residual_history = []
     solution_history = []
+    iteration_images = []  # Store x at each iteration for visualization
     
     r_norm_prev = np.linalg.norm(r)
     residual_history.append(r_norm_prev)
     solution_history.append(np.linalg.norm(x))
+    iteration_images.append(x.copy())  # Initial state
     
     converged = False
     final_epsilon = float('inf')
@@ -128,6 +131,7 @@ def cgnr_solve(
         
         residual_history.append(r_norm)
         solution_history.append(x_norm)
+        iteration_images.append(x.copy())  # Store current state
         
         # Calculate epsilon (same as C++: abs difference of residual norms)
         epsilon = abs(r_norm - r_norm_prev)
@@ -150,7 +154,8 @@ def cgnr_solve(
         converged=converged,
         execution_time_ms=execution_time_ms,
         residual_history=residual_history,
-        solution_history=solution_history
+        solution_history=solution_history,
+        iteration_images=iteration_images
     )
 
 

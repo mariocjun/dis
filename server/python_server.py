@@ -141,6 +141,16 @@ def save_image_with_metadata(image: np.ndarray, job_id: str, metadata: Dict[str,
     }
 
 
+def save_iteration_images(iteration_images: list, job_id: str, rows: int, cols: int):
+    """Save iteration images as CSV files for carousel visualization."""
+    images_dir = state.output_dir / 'images'
+    
+    for i, img_vec in enumerate(iteration_images):
+        img_2d = img_vec.reshape(rows, cols)
+        csv_path = images_dir / f"{job_id}_iter_{i:02d}.csv"
+        np.savetxt(csv_path, img_2d, delimiter=',', fmt='%.10e')
+
+
 # ----- API Endpoints -----
 @app.route('/health', methods=['GET'])
 def health():
@@ -294,6 +304,13 @@ def solve():
             ds['image_rows'], ds['image_cols']
         )
         metadata.update(image_paths)
+        
+        # Save iteration images for carousel visualization
+        if hasattr(result, 'iteration_images') and result.iteration_images:
+            save_iteration_images(
+                result.iteration_images, job_id,
+                ds['image_rows'], ds['image_cols']
+            )
         
         # Save telemetry
         telemetry = {

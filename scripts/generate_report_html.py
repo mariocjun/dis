@@ -37,49 +37,53 @@ def format_error(value: float) -> str:
     return f"{value:.4f}"
 
 
-def create_iteration_gif(img_dir: Path, output_dir: Path, dataset_id: str, server: str) -> Path:
-    """Create GIF animation from iteration images if available."""
+def create_iteration_frames(img_dir: Path, output_dir: Path, dataset_id: str, server: str) -> list:
+    """Create individual PNG frames from iteration images for carousel."""
     # Look for iteration files pattern: *_iter_*.csv
     pattern = f"*{dataset_id}*{server}*_iter_*.csv"
     iter_files = sorted(glob.glob(str(img_dir / pattern)))
     
     if len(iter_files) < 2:
-        return None
+        return []
     
-    gif_path = output_dir / f"anim_{dataset_id}_{server}.gif"
-    frames = []
+    frame_paths = []
     
-    for iter_file in iter_files:
+    for i, iter_file in enumerate(iter_files):
         try:
             data = np.loadtxt(iter_file, delimiter=',')
             
-            fig, ax = plt.subplots(figsize=(5, 5))
+            fig, ax = plt.subplots(figsize=(6, 6))
+            fig.patch.set_facecolor('#1a1a2e')
+            ax.set_facecolor('#1a1a2e')
+            
+            # Same transform as main image
+            data_rotated = np.flipud(np.rot90(data, k=1))
+            
             v_min, v_max = np.min(data), np.max(data)
             if v_max <= v_min:
                 v_max = v_min + 1.0
             
-            # Rotate 90 degrees counter-clockwise (left)
-            data_rotated = np.rot90(data, k=1)
+            im = ax.imshow(data_rotated, cmap='inferno', vmin=v_min, vmax=v_max)
             
-            ax.imshow(data_rotated, cmap='inferno', vmin=v_min, vmax=v_max)
+            # White colorbar
+            cbar = fig.colorbar(im, ax=ax)
+            cbar.ax.yaxis.set_tick_params(color='white')
+            plt.setp(cbar.ax.yaxis.get_ticklabels(), color='white')
+            
             iter_num = Path(iter_file).stem.split('_')[-1]
-            ax.set_title(f"Iteração {iter_num}", fontsize=12)
+            ax.set_title(f"Iteração {iter_num}", fontsize=14, fontweight='bold', color='white')
             ax.axis('off')
             
-            # Save to buffer
-            import io
-            buf = io.BytesIO()
-            fig.savefig(buf, format='png', dpi=80, bbox_inches='tight')
-            buf.seek(0)
-            frames.append(imageio.imread(buf))
+            frame_name = f"iter_{dataset_id}_{server}_{i:02d}.png"
+            frame_path = output_dir / frame_name
+            fig.savefig(frame_path, dpi=100, bbox_inches='tight', facecolor='#1a1a2e')
             plt.close(fig)
-        except:
-            pass
+            
+            frame_paths.append(frame_name)
+        except Exception as e:
+            print(f"[WARN] Failed to create frame {i}: {e}")
     
-    if frames:
-        imageio.mimsave(gif_path, frames, fps=3, loop=0)
-        return gif_path
-    return None
+    return frame_paths
 
 
 def create_image_png(csv_path: Path, output_path: Path, dataset: str, error: float, threshold: float):
@@ -185,12 +189,12 @@ def generate_html_report(input_dir: Path, output_dir: Path):
         
         create_image_png(img['csv'], png_path, dataset, error, epsilon)
         
-        # Try to create GIF animation
-        gif_path = create_iteration_gif(img_dir, assets_dir, dataset, server)
+        # Create iteration frames for carousel
+        iter_frames = create_iteration_frames(img_dir, assets_dir, dataset, server)
         
         image_data.append({
             'png': png_name,
-            'gif': gif_path.name if gif_path else None,
+            'frames': iter_frames,  # List of frame filenames for carousel
             'dataset': dataset,
             'server': server.upper(),
             'error': error,
@@ -265,22 +269,26 @@ def generate_html_template(**data):
         status_icon = "✓" if img['is_good'] else "✗"
         status_text = "Convergiu" if img['converged'] else "Max Iter"
         
-        gif_html = ""
-        if img['gif']:
-            gif_html = f"""
-                <div class="gif-toggle">
-                    <button onclick="toggleGif(this, '{img['gif']}')" class="btn-anim">▶ Animação</button>
-                </div>"""
+        # Build carousel if frames exist
+        carousel_html = ""
+        if img['frames'] and len(img['frames']) > 0:
+            frames_json = json.dumps(img['frames'])
+            carousel_html = f'''
+                <div class="carousel-controls">
+                    <button class="carousel-btn" onclick="prevFrame({i})">◀</button>
+                    <span class="carousel-info" id="carousel-info-{i}">Final</span>
+                    <button class="carousel-btn" onclick="nextFrame({i})">▶</button>
+                </div>'''
         
-        image_cards += f"""
-        <div class="image-card">
+        image_cards += f'''
+        <div class="image-card" data-frames='{json.dumps(img["frames"])}' data-main="{img['png']}" id="card-{i}">
             <div class="card-header">
                 <h3>{img['dataset']}</h3>
                 <span class="badge {'badge-cpp' if img['server']=='CPP' else 'badge-py'}">{img['server']}</span>
             </div>
             <div class="image-container">
                 <img src="report_assets/{img['png']}" alt="{img['dataset']}" class="main-image" id="img-{i}">
-                {gif_html}
+                {carousel_html}
             </div>
             <div class="card-stats">
                 <div class="stat">
@@ -300,7 +308,7 @@ def generate_html_template(**data):
                     <span class="stat-value">{status_text}</span>
                 </div>
             </div>
-        </div>"""
+        </div>'''
     
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -543,6 +551,44 @@ def generate_html_template(**data):
         
         .dot-good {{ background: var(--success); }}
         .dot-bad {{ background: var(--error); }}
+        
+        /* Carousel styles */
+        .carousel-controls {{
+            position: absolute;
+            bottom: 0.5rem;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(0,0,0,0.7);
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+        }}
+        
+        .carousel-btn {{
+            background: var(--accent);
+            color: white;
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s;
+        }}
+        
+        .carousel-btn:hover {{ background: var(--accent-light); }}
+        
+        .carousel-info {{
+            color: white;
+            font-size: 0.85rem;
+            min-width: 60px;
+            text-align: center;
+        }}
     </style>
 </head>
 <body>
@@ -630,19 +676,60 @@ def generate_html_template(**data):
     </div>
     
     <script>
-        function toggleGif(btn, gifName) {{
-            const container = btn.closest('.image-container');
-            const img = container.querySelector('.main-image');
-            const originalSrc = img.dataset.original || img.src;
+        // Carousel state: track current index for each card
+        const carouselState = {{}};
+        
+        function getCardData(cardIndex) {{
+            const card = document.getElementById('card-' + cardIndex);
+            if (!card) return null;
+            const frames = JSON.parse(card.dataset.frames || '[]');
+            const mainImg = card.dataset.main;
+            return {{ frames, mainImg, card }};
+        }}
+        
+        function updateCarouselDisplay(cardIndex) {{
+            const data = getCardData(cardIndex);
+            if (!data || data.frames.length === 0) return;
             
-            if (img.src.includes('.gif')) {{
-                img.src = originalSrc;
-                btn.textContent = '▶ Animação';
+            const idx = carouselState[cardIndex] || -1;
+            const img = document.getElementById('img-' + cardIndex);
+            const info = document.getElementById('carousel-info-' + cardIndex);
+            
+            if (idx === -1) {{
+                // Show final image
+                img.src = 'report_assets/' + data.mainImg;
+                info.textContent = 'Final';
             }} else {{
-                img.dataset.original = img.src;
-                img.src = 'report_assets/' + gifName;
-                btn.textContent = '⏹ Parar';
+                // Show iteration frame
+                img.src = 'report_assets/' + data.frames[idx];
+                info.textContent = 'Iter ' + (idx + 1) + '/' + data.frames.length;
             }}
+        }}
+        
+        function nextFrame(cardIndex) {{
+            const data = getCardData(cardIndex);
+            if (!data || data.frames.length === 0) return;
+            
+            if (carouselState[cardIndex] === undefined) carouselState[cardIndex] = -1;
+            
+            carouselState[cardIndex]++;
+            if (carouselState[cardIndex] >= data.frames.length) {{
+                carouselState[cardIndex] = -1; // Back to final
+            }}
+            updateCarouselDisplay(cardIndex);
+        }}
+        
+        function prevFrame(cardIndex) {{
+            const data = getCardData(cardIndex);
+            if (!data || data.frames.length === 0) return;
+            
+            if (carouselState[cardIndex] === undefined) carouselState[cardIndex] = -1;
+            
+            carouselState[cardIndex]--;
+            if (carouselState[cardIndex] < -1) {{
+                carouselState[cardIndex] = data.frames.length - 1; // Wrap to last iteration
+            }}
+            updateCarouselDisplay(cardIndex);
         }}
     </script>
 </body>
