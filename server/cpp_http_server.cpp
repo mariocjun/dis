@@ -26,7 +26,6 @@
 #include <nlohmann/json.hpp>
 #include <yaml-cpp/yaml.h>
 
-
 #include "solver_comparison.hpp"
 
 using json = nlohmann::json;
@@ -305,9 +304,9 @@ void handle_solve(const httplib::Request &req, httplib::Response &res) {
         std::chrono::duration<double, std::milli>(end_time - start_time)
             .count();
 
-    // Save outputs
+    // Save outputs - Add cpp_ prefix to prevent Python from overwriting
     fs::path img_csv_path =
-        g_state.output_dir / "images" / (job_id + "_image.csv");
+        g_state.output_dir / "images" / ("cpp_" + job_id + "_image.csv");
     save_image_csv(result.image, img_csv_path, ds.image_rows, ds.image_cols);
 
     json metadata = {
@@ -326,11 +325,11 @@ void handle_solve(const httplib::Request &req, httplib::Response &res) {
         {"solver_time_ms", result.execution_time_ms},
         {"latency_ms", latency_ms},
         {"server", "cpp"},
-        {"image_csv_path", "images/" + job_id + "_image.csv"},
-        {"metadata_json_path", "images/" + job_id + "_meta.json"}};
+        {"image_csv_path", "images/cpp_" + job_id + "_image.csv"},
+        {"metadata_json_path", "images/cpp_" + job_id + "_meta.json"}};
 
     fs::path meta_json_path =
-        g_state.output_dir / "images" / (job_id + "_meta.json");
+        g_state.output_dir / "images" / ("cpp_" + job_id + "_meta.json");
     save_metadata_json(metadata, meta_json_path);
     save_job_metrics(metadata);
 

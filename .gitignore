@@ -1,4 +1,5 @@
 __pycache__/
+/execs
 /build
 .cache
 /doc

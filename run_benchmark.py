@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-run_benchmark.py - Orchestrator for Ultrasound Benchmark
-FIXED: Redirects server logs to files to prevent Pipe Buffer Deadlock on Windows.
+run_benchmark.py - Scientific Orchestrator for Ultrasound Reconstruction
+Mode: DEMO (Deterministic) & STRESS (Random)
 """
 
 import os
@@ -14,13 +14,14 @@ import json
 import csv
 import psutil
 import threading
+import platform
+import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
 import yaml
 
+# --- System Monitor Thread ---
 class SystemMonitor(threading.Thread):
-    """Monitors system CPU and RAM usage second by second"""
     def __init__(self, output_file: Path, stop_event: threading.Event):
         super().__init__()
         self.output_file = output_file
@@ -46,13 +47,11 @@ class SystemMonitor(threading.Thread):
                 except: pass
                 time.sleep(1)
 
+# --- Main Orchestrator ---
 class BenchmarkOrchestrator:
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.config_path = project_root / "config.yaml"
-        self.effective_config_path: Optional[Path] = None
-        self.python_server_process: Optional[subprocess.Popen] = None
-        self.cpp_server_process: Optional[subprocess.Popen] = None
         self.output_dir: Optional[Path] = None
         self.py_log_file = None
         self.cpp_log_file = None
@@ -60,188 +59,202 @@ class BenchmarkOrchestrator:
         with open(self.config_path, 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
         
-        servers = self.config.get('servers', {})
-        self.python_port = servers.get('python', {}).get('port', 5001)
-        self.cpp_port = servers.get('cpp', {}).get('port', 5002)
-    
-    def setup_output_dir(self, suffix: str = "") -> Path:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dir_name = f"benchmark_{timestamp}"
-        if suffix: dir_name += f"_{suffix}"
+        self.python_port = self.config['servers']['python']['port']
+        self.cpp_port = self.config['servers']['cpp']['port']
+
+    def get_environment_snapshot(self) -> dict:
+        """Captures hardware/software environment for reproducibility"""
+        info = {
+            "timestamp": datetime.now().isoformat(),
+            "platform": platform.platform(),
+            "processor": platform.processor(),
+            "cpu_cores_physical": psutil.cpu_count(logical=False),
+            "cpu_cores_logical": psutil.cpu_count(logical=True),
+            "ram_total_gb": round(psutil.virtual_memory().total / (1024**3), 2),
+            "python_version": sys.version.split()[0],
+            "compiler_info": "Unknown (Check build logs)"
+        }
+        # Try to get C++ compiler info
+        try:
+            res = subprocess.run(["g++", "--version"], capture_output=True, text=True)
+            if res.returncode == 0: info["compiler_info"] = res.stdout.split('\n')[0]
+        except: pass
+        return info
+
+    def setup_experiment(self, mode: str) -> Path:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        dir_name = f"{timestamp}_{mode.upper()}"
+        self.output_dir = self.project_root / "execs" / dir_name
         
-        self.output_dir = self.project_root / "output_runs" / dir_name
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        (self.output_dir / "images").mkdir(exist_ok=True)
-        (self.output_dir / "telemetry").mkdir(exist_ok=True)
-        (self.output_dir / "graphs").mkdir(exist_ok=True)
-        (self.output_dir / "logs").mkdir(exist_ok=True) # Folder for server logs
-        
+        # Create structure
+        for sub in ["images", "telemetry", "graphs", "logs", "data"]:
+            (self.output_dir / sub).mkdir(parents=True, exist_ok=True)
+            
+        # Save Environment Snapshot
+        env_info = self.get_environment_snapshot()
+        with open(self.output_dir / "data" / "environment.json", "w") as f:
+            json.dump(env_info, f, indent=2)
+            
+        # Save Config Snapshot
         self._create_effective_config()
+        
+        print(f"\n[SETUP] Experiment initialized at: {self.output_dir}")
+        print(f"[SETUP] Environment: {env_info['platform']} | {env_info['cpu_cores_logical']} vCPUs | {env_info['ram_total_gb']} GB RAM")
         return self.output_dir
-    
+
     def _create_effective_config(self):
         import copy
         effective_config = copy.deepcopy(self.config)
-        effective_config['settings'] = effective_config.get('settings', {}).copy()
         effective_config['settings']['output_base_dir'] = str(self.output_dir.absolute())
         
+        # Absolute paths for data
         if 'datasets' in effective_config:
             for ds in effective_config['datasets']:
                 for key in ['h_matrix_csv', 'g_signal_csv']:
                     if key in ds:
-                        rel_path = ds[key]
-                        abs_path = (self.project_root / rel_path).absolute()
-                        ds[key] = str(abs_path)
+                        ds[key] = str((self.project_root / ds[key]).absolute())
         
-        self.effective_config_path = self.output_dir / "config_effective.yaml"
+        self.effective_config_path = self.output_dir / "data" / "config_snapshot.yaml"
         with open(self.effective_config_path, 'w', encoding='utf-8') as f:
-            yaml.dump(effective_config, f, default_flow_style=False, allow_unicode=True)
+            yaml.dump(effective_config, f)
 
-    def start_python_server(self) -> bool:
-        print("[INFO] Starting Python server...")
-        server_script = self.project_root / "server" / "python_server.py"
+    def start_servers(self):
+        print("[INFO] Starting Servers...")
         
-        # Redirect output to file to avoid buffer blocking
+        # Python
         self.py_log_file = open(self.output_dir / "logs" / "server_python.log", "w")
-        
-        self.python_server_process = subprocess.Popen(
-            [sys.executable, str(server_script), "--config", str(self.effective_config_path), "--port", str(self.python_port)],
-            cwd=str(self.project_root), 
-            stdout=self.py_log_file, 
-            stderr=subprocess.STDOUT
+        self.py_proc = subprocess.Popen(
+            [sys.executable, "server/python_server.py", "--config", str(self.effective_config_path), "--port", str(self.python_port)],
+            cwd=str(self.project_root), stdout=self.py_log_file, stderr=subprocess.STDOUT
         )
-        time.sleep(2)
-        if self.python_server_process.poll() is not None:
-            print("[ERROR] Python server failed to start. Check logs/server_python.log")
-            return False
-        return True
-    
-    def start_cpp_server(self) -> bool:
-        print("[INFO] Starting C++ server...")
-        exe_name = "UltrasoundServerHTTP.exe" if sys.platform == "win32" else "UltrasoundServerHTTP"
-        exe_path = self.project_root / "build" / exe_name
-        if not exe_path.exists(): exe_path = self.project_root / "build" / "Release" / exe_name
         
-        if not exe_path.exists():
-            print(f"[ERROR] C++ executable not found at {exe_path}")
-            return False
-            
-        # Redirect output to file
+        # C++
+        exe = "UltrasoundServerHTTP.exe" if sys.platform == "win32" else "UltrasoundServerHTTP"
+        exe_path = self.project_root / "build" / exe
+        if not exe_path.exists(): exe_path = self.project_root / "build" / "Release" / exe
+        
         self.cpp_log_file = open(self.output_dir / "logs" / "server_cpp.log", "w")
-
-        self.cpp_server_process = subprocess.Popen(
+        self.cpp_proc = subprocess.Popen(
             [str(exe_path), "--config", str(self.effective_config_path), "--port", str(self.cpp_port)],
-            cwd=str(self.project_root), 
-            stdout=self.cpp_log_file, 
-            stderr=subprocess.STDOUT
+            cwd=str(self.project_root), stdout=self.cpp_log_file, stderr=subprocess.STDOUT
         )
-        time.sleep(2)
-        if self.cpp_server_process.poll() is not None:
-            print("[ERROR] C++ server failed to start. Check logs/server_cpp.log")
-            return False
-        return True
-    
+        time.sleep(2) # Warmup
+
     def stop_servers(self):
-        print("[INFO] Stopping servers...")
-        for p in [self.python_server_process, self.cpp_server_process]:
-            if p:
-                p.terminate()
-                try: p.wait(timeout=5)
-                except: p.kill()
-        
-        # Close log files
+        print("[INFO] Stopping Servers...")
+        for p in [self.py_proc, self.cpp_proc]:
+            if p: p.terminate()
         if self.py_log_file: self.py_log_file.close()
         if self.cpp_log_file: self.cpp_log_file.close()
 
-    def run_3_clients(self, num_jobs_per_client: int, seed_base: int, datasets: List[str], python_only: bool, cpp_only: bool):
+    def run_client_job(self, job_prefix, num_jobs, datasets, concurrency=1, target_server=None):
+        """Generic client runner"""
         client_script = self.project_root / "client" / "client_generator.py"
+        procs = []
         
-        stop_monitor = threading.Event()
-        monitor_csv = self.output_dir / "telemetry" / "system_metrics.csv"
-        monitor = SystemMonitor(monitor_csv, stop_monitor)
-        monitor.start()
-        print(f"[INFO] System Monitor started.")
+        targets = []
+        if target_server == 'python' or target_server is None: targets.append(('python', self.python_port))
+        if target_server == 'cpp' or target_server is None: targets.append(('cpp', self.cpp_port))
 
-        servers_to_test = []
-        if not cpp_only: servers_to_test.append(('python', self.python_port))
-        if not python_only: servers_to_test.append(('cpp', self.cpp_port))
-
-        for server_name, port in servers_to_test:
-            print(f"\n{'='*60}")
-            print(f"LAUNCHING 3 CLIENTS AGAINST {server_name.upper()} SERVER")
-            print(f"{'='*60}")
-            
-            client_procs = []
-            for i in range(3):
-                client_seed = seed_base + i
+        for srv_name, port in targets:
+            for i in range(concurrency):
                 cmd = [
                     sys.executable, str(client_script),
-                    "--seed", str(client_seed),
-                    "--num-jobs", str(num_jobs_per_client),
+                    "--seed", str(42 + i), # Deterministic seeds
+                    "--num-jobs", str(num_jobs),
+                    "--output-dir", str(self.output_dir),
                     "--datasets"
                 ] + datasets
                 
-                if server_name == 'python':
-                    cmd.extend(["--python-only", "--python-url", f"http://localhost:{port}"])
-                else:
-                    cmd.extend(["--cpp-only", "--cpp-url", f"http://localhost:{port}"])
+                if srv_name == 'python': cmd.extend(["--python-only", "--python-url", f"http://localhost:{port}"])
+                else: cmd.extend(["--cpp-only", "--cpp-url", f"http://localhost:{port}"])
                 
-                cmd.extend(["--output-dir", str(self.output_dir)])
-
-                # Clients inherit stdout so we can see their progress in console
+                # Add prefix to identify phase in logs (requires client update or just rely on timestamp/order)
+                # For now, we rely on the sequential execution of this script.
+                
                 p = subprocess.Popen(cmd)
-                client_procs.append(p)
-            
-            for p in client_procs:
-                p.wait()
-            print(f"[ORCHESTRATOR] All 3 clients finished for {server_name}.")
+                procs.append(p)
+        
+        for p in procs: p.wait()
 
+    def run_demo_mode(self):
+        """
+        Executes the Scientific Demo Protocol:
+        1. Sanity Check (1 job)
+        2. The Race (3 reps for Std Dev)
+        3. Saturation (3 concurrent clients)
+        """
+        print("\n" + "="*60)
+        print("🚀 STARTING SCIENTIFIC DEMO PROTOCOL")
+        print("="*60)
+        
+        # All available datasets for comprehensive benchmark
+        all_30x30 = ["30x30_g1", "30x30_g2", "30x30_A1"]
+        all_60x60 = ["60x60_G1", "60x60_G2", "60x60_A1"]
+        all_datasets = all_30x30 + all_60x60
+
+        # --- ACT 1: SANITY CHECK ---
+        print("\n>>> ACT 1: SANITY CHECK (Warmup)")
+        self.run_client_job("sanity", 1, ["30x30_g1"], concurrency=1)
+
+        # --- ACT 2: THE RACE (Variability Analysis) ---
+        print("\n>>> ACT 2: THE RACE (Performance & Variability)")
+        # Run 3 times for each size to calculate Std Dev
+        print("    Testing 30x30 datasets (3 repetitions each)...")
+        self.run_client_job("race_30", 3, all_30x30, concurrency=1)
+        print("    Testing 60x60 datasets (3 repetitions each)...")
+        self.run_client_job("race_60", 3, all_60x60, concurrency=1)
+
+        # --- ACT 3: SATURATION ---
+        print("\n>>> ACT 3: SATURATION (Stress Test)")
+        stop_monitor = threading.Event()
+        monitor = SystemMonitor(self.output_dir / "telemetry" / "system_metrics.csv", stop_monitor)
+        monitor.start()
+        
+        # 3 Concurrent clients, all datasets
+        self.run_client_job("sat", 5, all_datasets, concurrency=3)
+        
         stop_monitor.set()
         monitor.join()
-        print("[INFO] System Monitor stopped.")
+
 
     def generate_report(self):
-        print("\n[INFO] Generating report...")
-        report_script = self.project_root / "scripts" / "generate_report.py"
+        print("\n[INFO] Generating Scientific Report (HTML)...")
+        # Priority: HTML > Markdown > Legacy
+        report_script = self.project_root / "scripts" / "generate_report_html.py"
+        if not report_script.exists():
+            report_script = self.project_root / "scripts" / "generate_report_md.py"
+        if not report_script.exists():
+            report_script = self.project_root / "scripts" / "generate_report.py"
         subprocess.run([sys.executable, str(report_script), "--input-dir", str(self.output_dir)])
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--num-jobs', type=int, default=5)
-    parser.add_argument('--python-only', action='store_true')
-    parser.add_argument('--cpp-only', action='store_true')
-    parser.add_argument('--datasets', nargs='+', default=['30x30_g1', '60x60_G1'])
+    parser.add_argument('--demo', action='store_true', help="Run deterministic scientific demo")
     args = parser.parse_args()
     
-    orchestrator = BenchmarkOrchestrator(Path(__file__).parent.absolute())
+    orch = BenchmarkOrchestrator(Path(__file__).parent.absolute())
     
     def cleanup(signum, frame):
-        orchestrator.stop_servers()
+        orch.stop_servers()
         sys.exit(1)
     signal.signal(signal.SIGINT, cleanup)
     
     try:
-        orchestrator.setup_output_dir(f"seed{args.seed}")
+        orch.setup_experiment("DEMO" if args.demo else "MANUAL")
+        orch.start_servers()
         
-        if not args.cpp_only: orchestrator.start_python_server()
-        if not args.python_only: orchestrator.start_cpp_server()
-        
-        time.sleep(2)
-        
-        orchestrator.run_3_clients(
-            num_jobs_per_client=args.num_jobs,
-            seed_base=args.seed,
-            datasets=args.datasets,
-            python_only=args.python_only,
-            cpp_only=args.cpp_only
-        )
-        
-        orchestrator.generate_report()
-        print(f"\n[SUCCESS] Benchmark Complete. Results in {orchestrator.output_dir}")
+        if args.demo:
+            orch.run_demo_mode()
+        else:
+            # Default manual run (backward compatibility)
+            orch.run_client_job("manual", 5, ["30x30_g1", "60x60_G1"], concurrency=3)
+            
+        orch.generate_report()
+        print(f"\n[SUCCESS] Experiment Complete. Report at: {orch.output_dir}/report.md")
         
     finally:
-        orchestrator.stop_servers()
+        orch.stop_servers()
 
 if __name__ == '__main__':
     main()
